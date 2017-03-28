@@ -1,0 +1,22 @@
+[package]
+name = "loader"
+version = "0.1.0"
+authors = ["Evan Davis <edavis@caltech.edu>"]
+
+[lib]
+name = "loader"
+crate-type = ["staticlib"]
+
+[dependencies]
+x86 = { version = "0.8.0", default-features = false }
+rlibc = "1.0"
+
+gnu_efi = { path = "../lib/gnu-efi" }
+serial = { path = "../lib/serial" }
+mem = { path = "../lib/mem" }
+frame_allocator = { path = "../lib/frame_allocator" }
+elf = { path = "../lib/elf" }
+
+[dependencies.page_table]
+path = "../lib/page_table"
+features = ["loader"]

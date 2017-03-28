@@ -1,0 +1,22 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+authors = ["Evan Davis <edavis@caltech.edu>"]
+
+[lib]
+name = "kernel"
+crate-type = ["staticlib"]
+
+[dependencies]
+x86 = { version = "0.8.0", default-features = false }
+rlibc = "1.0"
+lazy_static = { version = "0.2.0", features = ["spin_no_std"] }
+mem = { path = "../lib/mem" }
+gnu_efi = { path = "../lib/gnu-efi" }
+serial = { path = "../lib/serial" }
+frame_allocator = { path = "../lib/frame_allocator" }
+
+[dependencies.page_table]
+path = "../lib/page_table"
+features = ["kernel"]
+

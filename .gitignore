@@ -1,0 +1,11 @@
+target
+*.so
+*.o
+debug.efi
+__pycache__
+BOOTX64.efi
+*.pyc
+uefi.img
+*.sw*
+
+.DS_Store

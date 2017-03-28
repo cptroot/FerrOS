@@ -1,0 +1,8 @@
+[package]
+name = "serial"
+version = "0.1.0"
+authors = ["Evan Davis <edavis@caltech.edu>"]
+
+[dependencies]
+x86 = { version = "0.7.0", default-features = false }
+spin = "0.4.3"

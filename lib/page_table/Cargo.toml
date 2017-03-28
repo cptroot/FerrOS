@@ -1,0 +1,13 @@
+[package]
+name = "page_table"
+version = "0.1.0"
+authors = ["Evan Davis <edavis@caltech.edu>"]
+
+[features]
+loader = []
+kernel = []
+
+[dependencies]
+x86 = { version = "0.8.0", default-features = false }
+mem = { path = "../mem" }
+frame_allocator = { path = "../frame_allocator" }
