@@ -1,0 +1,5 @@
+
+Bootorder:
+
+Recommended reading:
+https://github.com/qemu/qemu/blob/master/docs/bootindex.txt

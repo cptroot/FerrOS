@@ -213,12 +213,16 @@ $(RELEASE_UEFI_IMG): $(RELEASE_KERNEL_EFI) $(RELEASE_LOADER_EFI)
 
 run: $(RELEASE_UEFI_IMG)
 	qemu-system-x86_64 -cpu qemu64 -smp cores=2,threads=1,sockets=1 \
-		-bios OVMF/OVMF.fd -drive file=$(RELEASE_UEFI_IMG),if=ide \
+		-bios OVMF/OVMF.fd \
+		-drive file=$(RELEASE_UEFI_IMG),if=none,id=disk \
+		-device ide-drive,drive=disk,bootindex=1 \
 		-nographic -monitor null -serial stdio
 
 debug: all
 	qemu-system-x86_64 -cpu qemu64 -smp cores=2,threads=1,sockets=1 \
-		-bios OVMF/OVMF.fd -drive file=$(UEFI_IMG),if=ide \
+		-bios OVMF/OVMF.fd \
+		-drive file=$(UEFI_IMG),if=none,id=disk \
+		-device ide-drive,drive=disk,bootindex=1 \
 		-nographic -monitor null -serial stdio -s
 
 clean:
