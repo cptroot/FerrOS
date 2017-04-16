@@ -74,6 +74,10 @@ target/debug/main.o: src/efi_main.c
 		-DEFI_FUNCTION_WRAPPER          \
 		-o target/debug/main.o
 
+target/debug/trampoline.o: src/trampoline.S
+	$(AS) src/trampoline.S 				\
+		-o target/debug/trampoline.o
+
 $(KERNEL_LIB): $(shell find kernel/src -type f) $(shell find lib/gnu-efi/src -type f)
 	cd kernel; xargo build $(XARGO_ARGS) 
 
@@ -152,8 +156,8 @@ $(LOADER_DEBUG_EFI): target/debug/main.so
 			target/debug/main.so 				\
 			$(LOADER_DEBUG_EFI)
 
-$(KERNEL_SO): $(KERNEL_LIB) kernel.lds
-	ld $(KERNEL_LIB)		\
+$(KERNEL_SO): $(KERNEL_LIB) target/debug/trampoline.o kernel.lds
+	ld $(KERNEL_LIB) target/debug/trampoline.o		\
 		-nostdlib							\
 		-znocombreloc						\
 		-zmax-page-size=0x1000				\
@@ -174,6 +178,7 @@ $(KERNEL_EFI): $(KERNEL_SO)
 			-j .rel 				\
 			-j .rela 				\
 			-j .reloc 				\
+			-j .trampoline 			\
 			--target=elf64-x86-64 \
 			$(KERNEL_SO) \
 			$(KERNEL_EFI)
@@ -223,7 +228,8 @@ debug: all
 		-bios OVMF/OVMF.fd \
 		-drive file=$(UEFI_IMG),if=none,id=disk \
 		-device ide-drive,drive=disk,bootindex=1 \
-		-nographic -monitor null -serial stdio -s
+		-nographic -monitor null -serial stdio -s -d cpu_reset \
+		| sed -e 's/^.*\x1b.*$$//'
 
 clean:
 	rm -f target/debug/*.o target/debug/main.so $(PROGRAM_EFI) $(UEFI_IMG) $(LOADER_EFI) $(LOADER_DEBUG_EFI) $(KERNEL_EFI) $(KERNEL_SO)

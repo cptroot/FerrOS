@@ -48,6 +48,10 @@ impl PageTable {
             ::x86::shared::control_regs::cr3_write(*self.pml4 as usize);
         }
     }
+
+    pub fn physical_address(&self) -> u32 {
+        (*self.pml4 as usize) as u32
+    }
 }
 
 mod level4 {

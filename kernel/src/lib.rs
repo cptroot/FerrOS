@@ -52,7 +52,7 @@ fn install_handlers() {
     interrupt::intr_enable();
 }
 
-static mut APIC_REGISTERS: Option<apic::ApicRegisters> = None;
+static mut LAPIC_REGISTERS: Option<apic::LapicRegisters> = None;
 
 static mut testing: i64 = 32;
 
@@ -86,7 +86,7 @@ pub extern fn kernel_entry(system_table:&gnu_efi::api::SystemTable, mut frame_al
     }
 
     // Get properties of the LAPIC
-    let (mut apic_registers, bootstrap, enabled, extended) =
+    let (mut lapic_registers, bootstrap, enabled, extended) =
         asm_routines::cpuid_lapic_enabled();
     if bootstrap {
         println!("lapic is in bootstrap mode");
@@ -117,11 +117,10 @@ pub extern fn kernel_entry(system_table:&gnu_efi::api::SystemTable, mut frame_al
 
         println!("Enumerated MADT types:");
         for header in madt.controllers() {
-            print!("type: {}", header.structure_type);
+            print!("type: {:?}", header.structure_type);
 
             match header.structure_type {
-                // Need to switch from constants to an enum
-                2 => {
+                gnu_efi::acpi::ApicStructureType::InterruptSourceOverride => {
                     let iso = header.to_interrupt_source_override();
                     print!(" source: {}", iso.source);
                     print!(" interrupt: {}", iso.global_system_interrupt);
@@ -135,15 +134,22 @@ pub extern fn kernel_entry(system_table:&gnu_efi::api::SystemTable, mut frame_al
 
     // LAPIC configuration
     // Page in LAPIC
-    apic_registers.page_in(&mut page_table);
+    lapic_registers.page_in(&mut page_table);
     unsafe {
-        APIC_REGISTERS = Some(apic_registers);
-        if let Some(ref mut apic_registers) = APIC_REGISTERS {
-            println!("{:08x}", apic_registers.get_lvt_timer_register());
-            println!("{:08x}", apic_registers.get_timer_initial_count_register());
+        let address: *mut u32 = 0x3100 as *mut u32;
+        *address = page_table.physical_address();
+        let address: *mut u64 = 0x3200 as *mut u64;
+        *address = (ap_bootstrap) as u64;
+        lapic_registers.send_startup_ipi();
+    }
+    unsafe {
+        LAPIC_REGISTERS = Some(lapic_registers);
+        if let Some(ref mut lapic_registers) = LAPIC_REGISTERS {
+            println!("{:08x}", lapic_registers.get_lvt_timer_register());
+            println!("{:08x}", lapic_registers.get_timer_initial_count_register());
 
-            apic_registers.set_lvt_timer_register(apic::TimerMode::Periodic, false, 0x20);
-            apic_registers.set_timer_initial_count_register(8000000);
+            lapic_registers.set_lvt_timer_register(apic::TimerMode::Periodic, false, 0x20);
+            lapic_registers.set_timer_initial_count_register(8000000);
         }
     }
 
@@ -197,6 +203,13 @@ pub extern fn kernel_entry(system_table:&gnu_efi::api::SystemTable, mut frame_al
         gnu_efi::def::Status::Success,
         0,
         core::ptr::null());
+}
+
+fn ap_bootstrap() {
+    println!("hello from processor 2");
+    unsafe {
+        asm!("hlt");
+    }
 }
 
 fn divide_by_zero() {
@@ -310,7 +323,7 @@ extern fn timer() {
     println!("in timer");
     unsafe {
         testing -= 1;
-        APIC_REGISTERS.as_mut().unwrap().eoi();
+        LAPIC_REGISTERS.as_mut().unwrap().eoi();
     }
 }
 

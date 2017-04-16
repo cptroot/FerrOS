@@ -121,15 +121,34 @@ impl ExtendedSystemDescriptorTable {
     }
 }
 
+#[repr(u8)]
+#[derive(PartialEq, Eq, Debug)]
+pub enum ApicStructureType {
+    LocalApic = 0x0,
+    IoApic = 0x1,
+    InterruptSourceOverride = 0x2,
+    NonMaskableInterruptSource = 0x3,
+    LocalApicNmi = 0x4,
+    LocalApicAddressOverride = 0x5,
+    IoSapic = 0x6,
+    LocalSapic = 0x7,
+    PlatformInterruptSources = 0x8,
+    ProcessorLocalX2apic = 0x9,
+    LocalX2apicNmi = 0xA,
+    Gic = 0xB,
+    Gicd = 0xC,
+}
+
 #[repr(packed)]
 pub struct InterruptControllerHeader {
-    pub structure_type: u8,
+    pub structure_type: ApicStructureType,
     length: u8,
 }
 
 impl InterruptControllerHeader {
     pub fn to_interrupt_source_override<'a>(&'a self) -> &'a InterruptSourceOverride {
-        assert!(self.structure_type == 2);
+        assert!(self.structure_type ==
+            ApicStructureType::InterruptSourceOverride);
         unsafe {
             mem::transmute(self)
         }

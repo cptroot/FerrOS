@@ -7,19 +7,35 @@ pub enum TimerMode {
     TSCDecline,
 }
 
-pub struct ApicRegisters {
+pub struct LapicRegisters {
     ptr: *mut u32,
 }
 
-impl ApicRegisters {
+impl LapicRegisters {
     pub fn new(ptr: *mut c_void) -> Self {
-        ApicRegisters {
+        LapicRegisters {
             ptr: ptr as *mut u32,
         }
     }
 
     pub fn page_in(&self, page_table: &mut ::page_table::PageTable) {
         page_table.insert_page(::mem::PhysicalAddress::new(self.ptr as usize).into(), ::mem::VirtualAddress::new(self.ptr as usize).into(), ::page_table::PageSize::FourKb);
+    }
+
+    pub unsafe fn send_startup_ipi(&mut self) {
+        let vector = 0x2u32; /* page 0x2000 */
+        let delivery_mode = 0b110u32;
+        let level = 0b1u32;
+        let destination_shorthand = 0b11u32; /* all excluding self */
+
+        let mut icr_low: u32 = 0;
+
+        icr_low |= vector << 0;
+        icr_low |= delivery_mode << 8;
+        icr_low |= level << 14;
+        icr_low |= destination_shorthand << 18;
+
+        *self.ptr.offset(4 * 0x30) = icr_low;
     }
 
     pub unsafe fn eoi(&mut self) {

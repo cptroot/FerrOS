@@ -220,7 +220,9 @@ fn new_stack(elf_file: elf::File, mut page_table: page_table::PageTable, system_
     for section_header in elf_file.section_headers() {
         println!("{:?}", section_header);
         match section_header.section_type {
-            SectionType::NoBits | SectionType::ProgramBits => {
+            SectionType::NoBits | SectionType::ProgramBits
+                    if ((section_header.virtual_address as usize) >=
+                        0x8000000000) => {
                 let size_bytes = mem::VirtualAddressOffset::new(section_header.size as isize);
                 let num_pages: mem::PageOffset = size_bytes.into();
                 let num_pages_isize: isize = num_pages.into();

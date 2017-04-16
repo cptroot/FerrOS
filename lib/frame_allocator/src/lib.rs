@@ -4,8 +4,11 @@ extern crate mem;
 
 use ::mem::{Frame, PhysicalAddress};
 
+/* Frame 1 is unused, frame 2 is for the AP Trampoline, and frame 3
+ * is the AP Trampoline stack
+ */
 pub static mut FRAME_ALLOCATOR: FrameAllocator = FrameAllocator {
-    next_frame: 1,
+    next_frame: 4,
 };
 
 pub struct FrameAllocator {

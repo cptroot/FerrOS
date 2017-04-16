@@ -32,7 +32,7 @@ pub fn cpuid_x2apic_enabled() -> bool {
 
 /// Returns whether the LAPIC is enabled, and whether
 /// it is in bootstrap or extended mode
-pub fn cpuid_lapic_enabled() -> (apic::ApicRegisters, bool, bool, bool) {
+pub fn cpuid_lapic_enabled() -> (apic::LapicRegisters, bool, bool, bool) {
     unsafe {
         let high:u32;
         let low:u32;
@@ -46,7 +46,7 @@ pub fn cpuid_lapic_enabled() -> (apic::ApicRegisters, bool, bool, bool) {
         let bootstrap = (low >> 8) & 0x1 == 0x1;
         let enabled =   (low >> 11) & 0x1 == 0x1;
         let extended = (low >> 10) & 0x1 == 0x1;
-        (apic::ApicRegisters::new(address as *mut _), bootstrap, enabled, extended)
+        (apic::LapicRegisters::new(address as *mut _), bootstrap, enabled, extended)
     }
 }
 

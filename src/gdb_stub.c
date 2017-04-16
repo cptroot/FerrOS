@@ -3,7 +3,7 @@
 
 void gdb_stub() {
 #ifdef DEBUG_MODE
-    Print(L"Waiting for GDB\n");
+    Print(L"\nWaiting for GDB\n");
 
     int wait = 1;
     while (wait) {
