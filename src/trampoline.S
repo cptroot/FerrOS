@@ -145,11 +145,11 @@ GDT64:                           # Global Descriptor Table (64-bit).
     .byte 0x20                      # Granularity.
     .byte 0                         # Base (high).
     GDTData:                       # The data descriptor.
-    .word 0xFFFF                    # Limit (low).
+    .word 0x0000                    # Limit (low).
     .word 0                         # Base (low).
     .byte 0                         # Base (middle)
     .byte 0x92                      # Access.
-    .byte 0x8F                      # Granularity.
+    .byte 0x80                      # Granularity.
     .byte 0                         # Base (high).
 #GDT64:                           # Global Descriptor Table (64-bit).
 #    .equ .null, . - GDT64         # The null descriptor.
@@ -173,6 +173,15 @@ Realm64:
     mov %ax, %fs
     mov %ax, %gs
     mov %ax, %ss
+
+    mov %cr0, %rax
+    or $1 << 1, %eax
+    mov %rax, %cr0
+
+    mov %cr4, %rax
+    or $1 << 9, %eax
+    or $1 << 10, %eax
+    mov %rax, %cr4
 
 
     mov $0x3200, %rax

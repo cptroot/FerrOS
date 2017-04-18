@@ -76,6 +76,12 @@ impl LapicRegisters {
             *self.ptr.offset(4 * 0x38) = count;
         }
     }
+
+    pub fn get_apic_id_register(&self) -> u32 {
+        unsafe {
+            *self.ptr.offset(4 * 0x2)
+        }
+    }
 }
 
 

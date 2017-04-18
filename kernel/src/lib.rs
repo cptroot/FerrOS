@@ -61,6 +61,49 @@ static mut testing: i64 = 32;
 /// we haven't yet exited boot services
 #[no_mangle]
 pub extern fn kernel_entry(system_table:&gnu_efi::api::SystemTable, mut frame_allocator: falloc::FrameAllocator, mut page_table: page_table::PageTable) -> ! {
+    // Initialize the GDT
+    unsafe {
+        use x86::shared::segmentation;
+        use x86::shared::segmentation::{SegmentDescriptor, Type};
+        use x86::shared::segmentation::{CODE_READ, DATA_WRITE};
+        use x86::shared::PrivilegeLevel;
+        use x86::shared::dtables::DescriptorTablePointer;
+        let gdt_frame = frame_allocator.get_frame();
+        let gdt_frame_num: usize = gdt_frame.into();
+        let gdt_page = ::mem::Page::new(gdt_frame_num);
+        let mut gdt_address: mem::VirtualAddress = gdt_page.into();
+
+        let segment_descriptors: &mut [u64] =
+            core::slice::from_raw_parts_mut(
+                gdt_address.as_mut_ptr() as *mut u64, 512);
+        segment_descriptors[0] = 0;
+        segment_descriptors[1] = 0;
+        segment_descriptors[2] = 0x0020_9a00_0000_0000;
+        segment_descriptors[3] = 0x0080_9200_0000_0000;
+        segment_descriptors[4] = 0x0020_fa00_0000_0000;
+        segment_descriptors[5] = 0x0080_f200_0000_0000;
+        let gdt: DescriptorTablePointer<SegmentDescriptor> = DescriptorTablePointer::new_gdtp(::core::mem::transmute(segment_descriptors));
+
+        x86::shared::dtables::lgdt(&gdt);
+
+        asm!("\
+                pushq $$0x10
+                lea 0x3(%rip), %rax
+                pushq %rax
+                lretq
+                1: nop
+                " : );
+
+        asm!("\
+                mov $$0x0, %eax
+                mov %ax, %ds
+                mov %ax, %es
+                mov %ax, %fs
+                mov %ax, %gs
+                mov %ax, %ss
+                " : );
+
+    }
     // Override IDT
     install_handlers();
 
@@ -135,6 +178,8 @@ pub extern fn kernel_entry(system_table:&gnu_efi::api::SystemTable, mut frame_al
     // LAPIC configuration
     // Page in LAPIC
     lapic_registers.page_in(&mut page_table);
+
+    println!("lapic APIC ID: {:x}", lapic_registers.get_apic_id_register());
     unsafe {
         let address: *mut u32 = 0x3100 as *mut u32;
         *address = page_table.physical_address();
@@ -159,43 +204,6 @@ pub extern fn kernel_entry(system_table:&gnu_efi::api::SystemTable, mut frame_al
         }
     }
 
-    /*
-    // Initialize the GDT
-    unsafe {
-        use x86::shared::segmentation;
-        use x86::shared::segmentation::{SegmentDescriptor, Type};
-        use x86::shared::segmentation::{CODE_READ, DATA_WRITE};
-        use x86::shared::PrivilegeLevel;
-        use x86::shared::dtables::DescriptorTablePointer;
-        let gdt_page = mem::Page::new(0x500);
-        let mut gdt_address: mem::VirtualAddress = gdt_page.into();
-
-        let segment_descriptors: &mut [SegmentDescriptor] =
-            core::slice::from_raw_parts_mut(
-                gdt_address.as_mut_ptr() as *mut SegmentDescriptor, 512);
-        segment_descriptors[0] = SegmentDescriptor::NULL;
-        segment_descriptors[1] = SegmentDescriptor::new(0, 0, Type::Code(CODE_READ), false, PrivilegeLevel::Ring0);
-        segment_descriptors[2] = SegmentDescriptor::new(0, 0, Type::Data(DATA_WRITE), false, PrivilegeLevel::Ring0);
-        segment_descriptors[3] = SegmentDescriptor::new(0, 0, Type::Code(CODE_READ), false, PrivilegeLevel::Ring3);
-        segment_descriptors[4] = SegmentDescriptor::new(0, 0, Type::Data(DATA_WRITE), false, PrivilegeLevel::Ring3);
-        segment_descriptors[5] = SegmentDescriptor::new(0, 0, Type::Code(CODE_READ), false, PrivilegeLevel::Ring0);
-        let gdt: DescriptorTablePointer<SegmentDescriptor> = DescriptorTablePointer::new_gdtp(segment_descriptors);
-
-        x86::shared::dtables::lgdt(&gdt);
-
-        /*
-        asm!("\
-                pushq $$0x8
-                lea 0x3(%rip), %rax
-                pushq %rax
-                lretq
-                1: nop
-                " : );
-                */
-
-        //let data_selector = segmentation::SegmentSelector::new(2, PrivilegeLevel::Ring0);
-        //segmentation::load_ss(data_selector);
-    }*/
 
     // Shutdown the computer
     system_table.runtime_services.reset_system(
@@ -207,6 +215,22 @@ pub extern fn kernel_entry(system_table:&gnu_efi::api::SystemTable, mut frame_al
 
 fn ap_bootstrap() {
     println!("hello from processor 2");
+    interrupt::intr_disable();
+    interrupt::install_idt();
+    interrupt::intr_enable();
+    println!("idt installed");
+
+    divide_by_zero();
+
+    // This line causes CPU 1 to crash in lowerHex
+    // instruction xorps
+    // Possibly need to enable floating point
+    unsafe {
+        if let Some(ref mut lapic_registers) = LAPIC_REGISTERS {
+            println!("lapic APIC ID: {:x}", lapic_registers.get_apic_id_register());
+        }
+    }
+
     unsafe {
         asm!("hlt");
     }
