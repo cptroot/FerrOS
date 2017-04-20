@@ -3,7 +3,7 @@
 #![feature(plugin)]
 #![feature(compiler_builtins_lib)]
 #![feature(const_fn)]
-#![feature(naked_functions)]
+#![feature(abi_x86_interrupt)]
 #![no_std]
 
 extern crate compiler_builtins;
@@ -18,6 +18,8 @@ extern crate rlibc;
 
 #[macro_use]
 extern crate x86;
+
+extern crate x86_64;
 
 extern crate mem;
 
@@ -36,20 +38,35 @@ extern crate page_table;
 mod asm_routines;
 
 // Code for modifying and using IDT
-mod interrupt;
+//mod interrupt;
 
 mod apic;
 
-fn install_handlers() {
-    for i in 0..HANDLERS.len() {
-        if let Some(handler) = HANDLERS[i] {
-            interrupt::install_handler(handler, i);
-        }
-    }
-    interrupt::install_handler(timer_handler, 0x20);
-    interrupt::intr_disable();
-    interrupt::install_idt();
-    interrupt::intr_enable();
+lazy_static! {
+    static ref IDT: x86_64::structures::idt::Idt = {
+        let mut idt = x86_64::structures::idt::Idt::new();
+        idt.divide_by_zero.set_handler_fn(divide_by_zero_handler);
+        idt.debug.set_handler_fn(debug_exception_handler);
+        idt.breakpoint.set_handler_fn(breakpoint_handler);
+        idt.overflow.set_handler_fn(overflow_handler);
+        idt.bound_range_exceeded.set_handler_fn(bound_handler);
+        idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
+        idt.device_not_available.set_handler_fn(missing_fpu_handler);
+        idt.double_fault.set_handler_fn(double_fault_handler);
+        idt.invalid_tss.set_handler_fn(invalid_tss_handler);
+        idt.segment_not_present.set_handler_fn(segment_not_present);
+        idt.stack_segment_fault.set_handler_fn(stack_segment_fault_handler);
+        idt.general_protection_fault.set_handler_fn(general_protection_handler);
+        idt.page_fault.set_handler_fn(page_fault_handler);
+        idt.x87_floating_point.set_handler_fn(fpu_error_handler);
+        idt.alignment_check.set_handler_fn(alignment_check_handler);
+        idt.machine_check.set_handler_fn(machine_check_handler);
+        idt.simd_floating_point.set_handler_fn(simd_exception_handler);
+        idt.virtualization.set_handler_fn(virtualization_exception_handler);
+        idt.interrupts[0].set_handler_fn(timer_handler);
+        idt.interrupts[0xdf].set_handler_fn(spurious_interrupt_handler);
+        idt
+    };
 }
 
 static mut LAPIC_REGISTERS: Option<apic::LapicRegisters> = None;
@@ -190,11 +207,13 @@ pub extern fn kernel_entry(system_table:&gnu_efi::api::SystemTable, mut frame_al
     unsafe {
         LAPIC_REGISTERS = Some(lapic_registers);
         if let Some(ref mut lapic_registers) = LAPIC_REGISTERS {
+            lapic_registers.enable_lapic(0xff);
+
             println!("{:08x}", lapic_registers.get_lvt_timer_register());
             println!("{:08x}", lapic_registers.get_timer_initial_count_register());
 
             lapic_registers.set_lvt_timer_register(apic::TimerMode::Periodic, false, 0x20);
-            lapic_registers.set_timer_initial_count_register(8000000);
+            //lapic_registers.set_timer_initial_count_register(8000000);
         }
     }
 
@@ -215,19 +234,30 @@ pub extern fn kernel_entry(system_table:&gnu_efi::api::SystemTable, mut frame_al
 
 fn ap_bootstrap() {
     println!("hello from processor 2");
-    interrupt::intr_disable();
-    interrupt::install_idt();
-    interrupt::intr_enable();
+    unsafe {
+        x86_64::instructions::interrupts::disable();
+        IDT.load();
+        x86_64::instructions::interrupts::enable();
+    }
     println!("idt installed");
 
-    divide_by_zero();
-
-    // This line causes CPU 1 to crash in lowerHex
-    // instruction xorps
-    // Possibly need to enable floating point
     unsafe {
         if let Some(ref mut lapic_registers) = LAPIC_REGISTERS {
+            lapic_registers.enable_lapic(0xff);
             println!("lapic APIC ID: {:x}", lapic_registers.get_apic_id_register());
+
+            println!("{:08x}", lapic_registers.get_lvt_timer_register());
+            println!("{:08x}", lapic_registers.get_timer_initial_count_register());
+
+            lapic_registers.set_lvt_timer_register(apic::TimerMode::Periodic, false, 0x20);
+            lapic_registers.set_timer_initial_count_register(8000000);
+
+            println!("{:08x}", lapic_registers.get_lvt_timer_register());
+        }
+    }
+
+    unsafe {
+        while testing > 0{
         }
     }
 
@@ -242,93 +272,9 @@ fn divide_by_zero() {
     }
 }
 
-const SIZE_OF_INTERRUPT_STACK_PUSH: i8 = 3;
+use x86_64::structures::idt::{ExceptionStackFrame, PageFaultErrorCode};
 
-macro_rules! enter_interrupt {
-    () => {
-        asm!("\
-            push %rbp
-            mov %rsp, %rbp
-            push %rax
-            sub $$0x10, %rsp
-        ");
-    };
-}
-
-macro_rules! exit_interrupt {
-    () => {
-        asm!("\
-            add $$0x10, %rsp
-            pop %rax
-            pop %rbp
-        ");
-        asm!("\
-            iretq
-        ");
-        unreachable!();
-    }
-}
-
-macro_rules! handler {
-    (error_code:$code:ty, $fn_name:ident, $function:ident) => {
-        #[naked]
-        extern fn $fn_name() -> ! {
-            let error_code_usize: usize;
-
-            unsafe {
-                // Move the error code down the stack
-                // 0x18 is calculated by
-                // (SIZE_OF_INTERUPT_STACK_PUSH - 2) * 0x8
-                asm!("\
-                    push %rax
-                    mov 0x8(%rsp), %rax
-                    mov %rax, -0x18(%rsp)
-                    pop %rax
-                    add $$0x8, %rsp
-                ");
-
-                enter_interrupt!();
-                asm!("\
-                    mov rdi, [rsp - 0x8]
-                    call $0
-                    " : : "i"($function as extern "C" fn($code)) : "rdi" : "intel"
-                );
-                exit_interrupt!();
-            }
-        }
-    };
-    ($fn_name:ident, $function:ident) => {
-        #[naked]
-        extern fn $fn_name() -> ! {
-            unsafe {
-                enter_interrupt!();
-            }
-            $function();
-            unsafe {
-                exit_interrupt!();
-            }
-        }
-    };
-}
-
-extern fn error_code_handler(error_code: u64) {
-    //println!("hello from error_code_handler");
-    unsafe {
-    }
-}
-
-extern fn handler() {
-    println!("exception");
-    unsafe {
-        panic!("exception");
-    }
-}
-
-struct PageFaultErrorCode {
-    error: u64,
-}
-
-extern fn page_fault_fn(error_code: PageFaultErrorCode) {
+extern "x86-interrupt" fn page_fault_handler(stack_frame: &mut ExceptionStackFrame, error_code: PageFaultErrorCode) {
     let cr2: usize = unsafe {
         let result: usize;
         asm!("\
@@ -343,7 +289,7 @@ fn print_something_else(cr2: usize) {
     println!("Page fault address: {:x}", cr2);
 }
 
-extern fn timer() {
+extern "x86-interrupt" fn timer_handler(stack_frame: &mut ExceptionStackFrame) {
     println!("in timer");
     unsafe {
         testing -= 1;
@@ -351,51 +297,46 @@ extern fn timer() {
     }
 }
 
-handler!(divide_by_zero_handler, handler);
-handler!(debug_exception_handler, handler);
-handler!(breakpoint_handler, handler);
-handler!(overflow_handler, handler);
-handler!(bound_handler, handler);
-handler!(invalid_opcode_handler, handler);
-handler!(missing_fpu_handler, handler);
-handler!(double_fault_handler, handler);
-handler!(invalid_tss_handler, handler);
-handler!(segment_not_present, handler);
-handler!(stack_segment_fault_handler, handler);
-handler!(general_protection_handler, handler);
-handler!(error_code:PageFaultErrorCode, page_fault_handler, page_fault_fn);
-handler!(fpu_error_handler, handler);
-handler!(alignment_check_handler, handler);
-handler!(machine_check_handler, handler);
-handler!(simd_exception_handler, handler);
-handler!(virtualization_exception_handler, handler);
+macro_rules! unhandled_exception_handler {
+    ( $fn_name:ident ) => {
+        extern "x86-interrupt" fn $fn_name(_: &mut ExceptionStackFrame) {
+            println!("unhandled exception: {}", stringify!($fn_name));
+        }
+    };
+    ( error $fn_name:ident ) => {
+        extern "x86-interrupt" fn $fn_name(_: &mut ExceptionStackFrame, _:u64) {
+            println!("unhandled exception: {}", stringify!($fn_name));
+        }
+    };
+}
 
-handler!(timer_handler, timer);
+fn install_handlers() {
+    unsafe {
+        x86_64::instructions::interrupts::disable();
+        IDT.load();
+        x86_64::instructions::interrupts::enable();
+    }
+}
 
-static HANDLERS: [Option<extern fn() -> !>; 21] = [
-    Some(divide_by_zero_handler),
-    Some(debug_exception_handler),
-    None, //Some(handler!(nmi_interrupt_handler, handler)),
-    Some(breakpoint_handler),
-    Some(overflow_handler),
-    Some(bound_handler),
-    Some(invalid_opcode_handler),
-    Some(missing_fpu_handler),
-    Some(double_fault_handler),
-    None,
-    Some(invalid_tss_handler),
-    Some(segment_not_present),
-    Some(stack_segment_fault_handler),
-    Some(general_protection_handler),
-    Some(page_fault_handler),
-    None, //Intel Reseved
-    Some(fpu_error_handler),
-    Some(alignment_check_handler),
-    Some(machine_check_handler),
-    Some(simd_exception_handler),
-    Some(virtualization_exception_handler),
-];
+unhandled_exception_handler!(divide_by_zero_handler);
+unhandled_exception_handler!(debug_exception_handler);
+unhandled_exception_handler!(breakpoint_handler);
+unhandled_exception_handler!(overflow_handler);
+unhandled_exception_handler!(bound_handler);
+unhandled_exception_handler!(invalid_opcode_handler);
+unhandled_exception_handler!(missing_fpu_handler);
+unhandled_exception_handler!(error double_fault_handler);
+unhandled_exception_handler!(error invalid_tss_handler);
+unhandled_exception_handler!(error segment_not_present);
+unhandled_exception_handler!(error stack_segment_fault_handler);
+unhandled_exception_handler!(error general_protection_handler);
+unhandled_exception_handler!(fpu_error_handler);
+unhandled_exception_handler!(error alignment_check_handler);
+unhandled_exception_handler!(machine_check_handler);
+unhandled_exception_handler!(simd_exception_handler);
+unhandled_exception_handler!(virtualization_exception_handler);
 
+unhandled_exception_handler!(spurious_interrupt_handler);
 
 /// Special functions to make the compiler happy. Maybe
 /// eventually these will be used to support runtime

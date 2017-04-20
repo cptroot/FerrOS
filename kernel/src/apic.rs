@@ -77,6 +77,24 @@ impl LapicRegisters {
         }
     }
 
+    pub fn get_timer_current_count_register(&self) -> u32 {
+        unsafe {
+            *self.ptr.offset(4 * 0x39)
+        }
+    }
+
+    pub fn get_spurious_interrupt_vector(&self) -> u32 {
+        unsafe {
+            *self.ptr.offset(4 * 0x0f)
+        }
+    }
+
+    pub fn enable_lapic(&self, spurious_interrupt_vector: u8) {
+        unsafe {
+            *self.ptr.offset(4 * 0x0f) = (1 << 8) | spurious_interrupt_vector as u32;
+        }
+    }
+
     pub fn get_apic_id_register(&self) -> u32 {
         unsafe {
             *self.ptr.offset(4 * 0x2)

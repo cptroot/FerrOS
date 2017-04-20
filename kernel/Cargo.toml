@@ -8,6 +8,7 @@ name = "kernel"
 crate-type = ["staticlib"]
 
 [dependencies]
+x86_64 = "0.1.2"
 x86 = { version = "0.8.0", default-features = false }
 rlibc = "1.0"
 lazy_static = { version = "0.2.0", features = ["spin_no_std"] }
