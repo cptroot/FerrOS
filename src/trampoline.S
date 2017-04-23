@@ -74,14 +74,8 @@ enable_protected_mode:
 #    mov %eax, %cr0
 
 # set cr3 (pml4)
-    mov $0x3100, %bx
-    mov (%bx), %eax
+    mov 0x3100, %eax
     mov %eax, %cr3
-
-    mov %cr3, %eax
-    add $0x8, %bx
-    mov %eax, (%bx)
-    push %eax
 
 # enable PAE mode
     mov %cr4, %eax          # Set the A-register to control register 4.
@@ -103,14 +97,6 @@ enable_protected_mode:
     cli
     mov Pointer, %eax
     lgdtl Pointer
-
-    add $0x4, %bx
-    mov %eax, (%bx)
-    push %eax
-
-    add $0x4, %bx
-    movl $0x1, (%bx)
-    pushl $0x1
 
     ljmp $0x10, $Realm64
 
@@ -163,10 +149,6 @@ GDT64:                           # Global Descriptor Table (64-bit).
     .code64
 Realm64:
 # jump to rust
-    sub $0x4, %esp
-    movq $0xFFFFFFFFFFFFFFFF, %rbx
-    push %rbx
-
     mov $0x0, %ax
     mov %ax, %ds
     mov %ax, %es
@@ -183,9 +165,8 @@ Realm64:
     or $1 << 10, %eax
     mov %rax, %cr4
 
-
-    mov $0x3200, %rax
-    mov (%rax), %rax
+# load entry fn
+    mov 0x3200, %rax
 
     callq *%rax
     hlt

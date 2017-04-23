@@ -16,7 +16,6 @@ extern crate rlibc;
 // Pulls in llvm intrinsics
 //extern crate compiler_builtins;
 
-#[macro_use]
 extern crate x86;
 
 extern crate x86_64;
@@ -80,10 +79,7 @@ static mut testing: i64 = 32;
 pub extern fn kernel_entry(system_table:&gnu_efi::api::SystemTable, mut frame_allocator: falloc::FrameAllocator, mut page_table: page_table::PageTable) -> ! {
     // Initialize the GDT
     unsafe {
-        use x86::shared::segmentation;
-        use x86::shared::segmentation::{SegmentDescriptor, Type};
-        use x86::shared::segmentation::{CODE_READ, DATA_WRITE};
-        use x86::shared::PrivilegeLevel;
+        use x86::shared::segmentation::{SegmentDescriptor};
         use x86::shared::dtables::DescriptorTablePointer;
         let gdt_frame = frame_allocator.get_frame();
         let gdt_frame_num: usize = gdt_frame.into();
