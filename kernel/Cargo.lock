@@ -2,6 +2,7 @@
 name = "kernel"
 version = "0.1.0"
 dependencies = [
+ "atomic_ring_buffer 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "frame_allocator 0.1.0",
  "gnu_efi 0.1.0",
  "lazy_static 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -9,9 +10,15 @@ dependencies = [
  "page_table 0.1.0",
  "rlibc 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serial 0.1.0",
+ "spin 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "x86 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "x86_64 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "atomic_ring_buffer"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "bit_field"
@@ -55,6 +62,7 @@ version = "0.1.0"
 dependencies = [
  "frame_allocator 0.1.0",
  "mem 0.1.0",
+ "rlibc 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "x86 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -107,6 +115,7 @@ dependencies = [
 ]
 
 [metadata]
+"checksum atomic_ring_buffer 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)" = "952bf35fca60cbc2dd18c9c76c30badf375dabf90907f5ef392b8d1d20b17deb"
 "checksum bit_field 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ff91a64014e1bc53bf643920f2c9ab5f0980d92a0948295f3ee550e9266849ad"
 "checksum bitflags 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)" = "aad18937a628ec6abcd26d1489012cc0e18c21798210f491af69ded9b881106d"
 "checksum lazy_static 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)" = "7291b1dd97d331f752620b02dfdbc231df7fc01bf282a00769e1cdb963c460dc"

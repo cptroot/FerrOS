@@ -99,6 +99,12 @@ impl SerialWriter {
         result
     }
 
+    pub unsafe fn new_init() -> SerialWriter {
+        SerialWriter {
+            mode: SerialMode::Poll,
+        }
+    }
+
     /// Initializes the serial port device for polling mode.  Polling mode
     /// busy-waits for the serial port to become free before writing to it.  It's
     /// slow, but until interrupts have been initialized it's all we can do.

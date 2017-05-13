@@ -3,6 +3,12 @@ name = "kernel"
 version = "0.1.0"
 authors = ["Evan Davis <edavis@caltech.edu>"]
 
+[profile.release]
+debug = true
+
+[profile.dev]
+opt-level = 1
+
 [lib]
 name = "kernel"
 crate-type = ["staticlib"]
@@ -10,6 +16,8 @@ crate-type = ["staticlib"]
 [dependencies]
 x86_64 = "0.1.2"
 x86 = { version = "0.8.0", default-features = false }
+spin = "0.4.5"
+atomic_ring_buffer = { version = "1.0.0", default-features = false, features = ["const_fn"] }
 rlibc = "1.0"
 lazy_static = { version = "0.2.0", features = ["spin_no_std"] }
 mem = { path = "../lib/mem" }

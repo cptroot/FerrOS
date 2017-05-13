@@ -2,6 +2,7 @@
 #![feature(unique)]
 
 extern crate x86;
+extern crate rlibc;
 
 extern crate mem;
 extern crate frame_allocator as falloc;
@@ -80,9 +81,7 @@ mod level4 {
                 let frame = unsafe { ::falloc::FRAME_ALLOCATOR.get_frame() };
                 let physical_address: ::mem::PhysicalAddress = frame.into();
                 let ptr = physical_address.as_ptr() as *mut level3::PageMap;
-                unsafe {
-                    *ptr = Default::default();
-                }
+                level3::PageMap::new_in_place(ptr);
 
                 self.table[index] = PageTableEntry::new(frame).into();
             }
@@ -180,6 +179,12 @@ mod level3 {
     }
 
     impl PageMap {
+        pub fn new_in_place(page_map: *mut PageMap) {
+            unsafe {
+                ::rlibc::memset(page_map as *mut u8, 0, 0x1000);
+            }
+        }
+
         pub fn insert_page(&mut self, frame: Frame, page: Page, page_size: PageSize) {
             let index = {
                 let virtual_address: ::mem::VirtualAddress = page.into();
@@ -205,9 +210,7 @@ mod level3 {
                         self.table[index] = entry.into();
 
                         let ptr = physical_address.as_ptr() as *mut level2::PageMap;
-                        unsafe {
-                            *ptr = Default::default();
-                        }
+                        level2::PageMap::new_in_place(ptr);
                         entry
                     };
                         
@@ -372,6 +375,12 @@ mod level2 {
     }
 
     impl PageMap {
+        pub fn new_in_place(page_map: *mut PageMap) {
+            unsafe {
+                ::rlibc::memset(page_map as *mut u8, 0, 0x1000);
+            }
+        }
+
         pub fn insert_page(&mut self, frame: Frame, page: Page, page_size: PageSize) {
             let index = {
                 let virtual_address: ::mem::VirtualAddress = page.into();
@@ -397,9 +406,7 @@ mod level2 {
                         self.table[index] = entry.into();
 
                         let ptr = physical_address.as_ptr() as *mut level1::PageMap;
-                        unsafe {
-                            *ptr = Default::default();
-                        }
+                        level1::PageMap::new_in_place(ptr);
                         entry
                     };
 
@@ -548,6 +555,12 @@ mod level1 {
     }
 
     impl PageMap {
+        pub fn new_in_place(page_map: *mut PageMap) {
+            unsafe {
+                ::rlibc::memset(page_map as *mut u8, 0, 0x1000);
+            }
+        }
+
         pub fn insert_page(&mut self, frame: Frame, page: Page, page_size: PageSize) {
             let index = {
                 let virtual_address: ::mem::VirtualAddress = page.into();

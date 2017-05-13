@@ -2,6 +2,7 @@
 #![feature(asm)]
 #![feature(plugin)]
 #![feature(compiler_builtins_lib)]
+#![feature(core_intrinsics)]
 #![feature(const_fn)]
 #![feature(abi_x86_interrupt)]
 #![no_std]
@@ -17,8 +18,10 @@ extern crate rlibc;
 //extern crate compiler_builtins;
 
 extern crate x86;
-
 extern crate x86_64;
+
+extern crate spin;
+extern crate atomic_ring_buffer;
 
 extern crate mem;
 
@@ -36,47 +39,73 @@ extern crate page_table;
 // bindings to cpuid
 mod asm_routines;
 
+mod once_mut;
+
 // Code for modifying and using IDT
 //mod interrupt;
 
+mod threads;
+
 mod apic;
 
+static IDT: once_mut::OnceMut<x86_64::structures::idt::Idt> = once_mut::OnceMut::new();
 lazy_static! {
-    static ref IDT: x86_64::structures::idt::Idt = {
-        let mut idt = x86_64::structures::idt::Idt::new();
-        idt.divide_by_zero.set_handler_fn(divide_by_zero_handler);
-        idt.debug.set_handler_fn(debug_exception_handler);
-        idt.breakpoint.set_handler_fn(breakpoint_handler);
-        idt.overflow.set_handler_fn(overflow_handler);
-        idt.bound_range_exceeded.set_handler_fn(bound_handler);
-        idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
-        idt.device_not_available.set_handler_fn(missing_fpu_handler);
-        idt.double_fault.set_handler_fn(double_fault_handler);
-        idt.invalid_tss.set_handler_fn(invalid_tss_handler);
-        idt.segment_not_present.set_handler_fn(segment_not_present);
-        idt.stack_segment_fault.set_handler_fn(stack_segment_fault_handler);
-        idt.general_protection_fault.set_handler_fn(general_protection_handler);
-        idt.page_fault.set_handler_fn(page_fault_handler);
-        idt.x87_floating_point.set_handler_fn(fpu_error_handler);
-        idt.alignment_check.set_handler_fn(alignment_check_handler);
-        idt.machine_check.set_handler_fn(machine_check_handler);
-        idt.simd_floating_point.set_handler_fn(simd_exception_handler);
-        idt.virtualization.set_handler_fn(virtualization_exception_handler);
-        idt.interrupts[0].set_handler_fn(timer_handler);
-        idt.interrupts[0xdf].set_handler_fn(spurious_interrupt_handler);
-        idt
-    };
+    static ref PAGE_TABLE: spin::Mutex<page_table::PageTable> = spin::Mutex::new(unsafe { ::core::mem::replace(&mut PAGE_TABLE_MUT, None).unwrap() });
 }
 
 static mut LAPIC_REGISTERS: Option<apic::LapicRegisters> = None;
 
-static mut testing: i64 = 32;
+static mut PAGE_TABLE_MUT: Option<page_table::PageTable> = None;
+
+use atomic_ring_buffer::AtomicRingBuffer;
+use threads::Thread;
+static ALL_THREADS: AtomicRingBuffer<*mut Thread, [*mut Thread; 4]> =
+    AtomicRingBuffer::new([0 as *mut Thread; 4]);
+
+/*
+pub fn initialize_statics(mut page_table: page_table::PageTable) {
+    PAGE_TABLE.call_once(spin::Mutex::new(page_table));
+}
+*/
+
+pub fn initialize_idt(idt: &mut x86_64::structures::idt::Idt) {
+    *idt = x86_64::structures::idt::Idt::new();
+    idt.divide_by_zero.set_handler_fn(divide_by_zero_handler);
+    idt.debug.set_handler_fn(debug_exception_handler);
+    idt.breakpoint.set_handler_fn(breakpoint_handler);
+    idt.overflow.set_handler_fn(overflow_handler);
+    idt.bound_range_exceeded.set_handler_fn(bound_handler);
+    idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
+    idt.device_not_available.set_handler_fn(missing_fpu_handler);
+    idt.double_fault.set_handler_fn(double_fault_handler);
+    idt.invalid_tss.set_handler_fn(invalid_tss_handler);
+    idt.segment_not_present.set_handler_fn(segment_not_present);
+    idt.stack_segment_fault.set_handler_fn(stack_segment_fault_handler);
+    idt.general_protection_fault.set_handler_fn(general_protection_handler);
+    idt.page_fault.set_handler_fn(page_fault_handler);
+    idt.x87_floating_point.set_handler_fn(fpu_error_handler);
+    idt.alignment_check.set_handler_fn(alignment_check_handler);
+    idt.machine_check.set_handler_fn(machine_check_handler);
+    idt.simd_floating_point.set_handler_fn(simd_exception_handler);
+    idt.virtualization.set_handler_fn(virtualization_exception_handler);
+    idt.interrupts[0].set_handler_fn(timer_handler);
+    idt.interrupts[0xdf].set_handler_fn(spurious_interrupt_handler);
+}
 
 /// This is the entry point for the rust language part of the
 /// OS. At this point all UEFI code can still be run, and
 /// we haven't yet exited boot services
 #[no_mangle]
-pub extern fn kernel_entry(system_table:&gnu_efi::api::SystemTable, mut frame_allocator: falloc::FrameAllocator, mut page_table: page_table::PageTable) -> ! {
+pub extern fn kernel_entry(
+    system_table:&gnu_efi::api::SystemTable,
+    mut frame_allocator: falloc::FrameAllocator,
+    page_table: page_table::PageTable)
+        -> ! {
+    unsafe {
+        ::core::mem::replace(&mut PAGE_TABLE_MUT, Some(page_table));
+    }
+    ::lazy_static::initialize(&PAGE_TABLE);
+
     // Initialize the GDT
     unsafe {
         use x86::shared::segmentation::{SegmentDescriptor};
@@ -118,6 +147,7 @@ pub extern fn kernel_entry(system_table:&gnu_efi::api::SystemTable, mut frame_al
 
     }
     // Override IDT
+    IDT.call_once(initialize_idt);
     install_handlers();
 
     println!("");
@@ -190,12 +220,12 @@ pub extern fn kernel_entry(system_table:&gnu_efi::api::SystemTable, mut frame_al
 
     // LAPIC configuration
     // Page in LAPIC
-    lapic_registers.page_in(&mut page_table);
+    lapic_registers.page_in(&mut *PAGE_TABLE.lock());
 
     println!("lapic APIC ID: {:x}", lapic_registers.get_apic_id_register());
     unsafe {
         let address: *mut u32 = 0x3100 as *mut u32;
-        *address = page_table.physical_address();
+        *address = PAGE_TABLE.lock().physical_address();
         let address: *mut u64 = 0x3200 as *mut u64;
         *address = (ap_bootstrap) as u64;
         lapic_registers.send_startup_ipi();
@@ -209,16 +239,49 @@ pub extern fn kernel_entry(system_table:&gnu_efi::api::SystemTable, mut frame_al
             println!("{:08x}", lapic_registers.get_timer_initial_count_register());
 
             lapic_registers.set_lvt_timer_register(apic::TimerMode::Periodic, false, 0x20);
-            //lapic_registers.set_timer_initial_count_register(8000000);
+            lapic_registers.set_timer_initial_count_register(8000000);
         }
     }
 
-    // Testing LAPIC
+    let first_thread = unsafe {
+        let page = ::mem::Page::new(0x80_0010_0);
+        let frame = ::falloc::FRAME_ALLOCATOR.get_frame();
+
+        PAGE_TABLE.lock().insert_page(frame, page, ::page_table::PageSize::FourKb);
+
+        let page_vaddr: ::mem::VirtualAddress = page.into();
+        let addr_usize: usize = page_vaddr.into();
+        let thread: *mut threads::Thread = addr_usize as *mut threads::Thread;
+
+        threads::Thread::new_in_place(thread, count_up);
+
+        thread
+    };
+
     unsafe {
-        while testing > 0{
+        let page = ::mem::Page::new(0x80_0030_0);
+        let frame = ::falloc::FRAME_ALLOCATOR.get_frame();
+
+        PAGE_TABLE.lock().insert_page(frame, page, ::page_table::PageSize::FourKb);
+
+        let page_vaddr: ::mem::VirtualAddress = page.into();
+        let addr_usize: usize = page_vaddr.into();
+        let thread: *mut threads::Thread = addr_usize as *mut threads::Thread;
+
+        threads::Thread::new_in_place(thread, up_down);
+
+        ALL_THREADS.enqueue(|thread_ptr| { *thread_ptr = thread; });
+    }
+
+    unsafe {
+        if let Some(ref mut lapic_registers) = LAPIC_REGISTERS {
+            lapic_registers.set_timer_initial_count_register(80000000);
         }
     }
 
+    unsafe {
+        (*first_thread).start_first_thread();
+    }
 
     // Shutdown the computer
     system_table.runtime_services.reset_system(
@@ -228,15 +291,54 @@ pub extern fn kernel_entry(system_table:&gnu_efi::api::SystemTable, mut frame_al
         core::ptr::null());
 }
 
-fn ap_bootstrap() {
-    println!("hello from processor 2");
+fn up_down() {
+    let mut i = 0;
+    loop {
+        while i < 10000000 {
+            i += 1;
+        }
+        println!("i goes up!");
+        while i > 0 {
+            i -= 1;
+        }
+        println!("i comes down!");
+    }
+}
+
+fn count_up() {
+    let mut i = 0;
+    while i < 10000000 {
+        if i == 9999999 {
+            println!("i == 9999999");
+            i = 0;
+        } else {
+            i += 1;
+        }
+    }
+}
+
+fn count_down() {
+    let mut i = 10000000;
+    while i != 0 {
+        if i > 1 {
+            i -= 1;
+        } else {
+            i = 10000000;
+            println!("i == 1");
+        }
+    }
+}
+
+fn ap_initialize_idt() {
     unsafe {
         x86_64::instructions::interrupts::disable();
-        IDT.load();
+        IDT.try().unwrap().load();
         x86_64::instructions::interrupts::enable();
     }
     println!("idt installed");
+}
 
+fn ap_initialize_timer() {
     unsafe {
         if let Some(ref mut lapic_registers) = LAPIC_REGISTERS {
             lapic_registers.enable_lapic(0xff);
@@ -246,20 +348,38 @@ fn ap_bootstrap() {
             println!("{:08x}", lapic_registers.get_timer_initial_count_register());
 
             lapic_registers.set_lvt_timer_register(apic::TimerMode::Periodic, false, 0x20);
-            lapic_registers.set_timer_initial_count_register(8000000);
+            lapic_registers.set_timer_initial_count_register(80000000);
 
             println!("{:08x}", lapic_registers.get_lvt_timer_register());
         }
     }
+}
 
+fn ap_initialize_thread() -> ! {
     unsafe {
-        while testing > 0{
-        }
-    }
+        let page = ::mem::Page::new(0x80_0020_0);
+        let frame = ::falloc::FRAME_ALLOCATOR.get_frame();
 
-    unsafe {
-        asm!("hlt");
+        PAGE_TABLE.lock().insert_page(frame, page, ::page_table::PageSize::FourKb);
+
+        let page_vaddr: ::mem::VirtualAddress = page.into();
+        let addr_usize: usize = page_vaddr.into();
+        let thread: *mut threads::Thread = addr_usize as *mut threads::Thread;
+
+        threads::Thread::new_in_place(thread, count_down);
+
+        (*thread).start_first_thread();
     }
+}
+
+fn ap_bootstrap() -> ! {
+    println!("hello from processor 2");
+
+    ap_initialize_idt();
+
+    ap_initialize_timer();
+
+    ap_initialize_thread();
 }
 
 fn divide_by_zero() {
@@ -286,10 +406,33 @@ fn print_something_else(cr2: usize) {
 }
 
 extern "x86-interrupt" fn timer_handler(stack_frame: &mut ExceptionStackFrame) {
-    println!("in timer");
     unsafe {
-        testing -= 1;
+        use ::core::fmt::Write;
+        let mut writer = serial::SerialWriter::new_init();
+        if let Err(err) = writer.write_fmt(format_args!("in timer\n")) {
+            panic!("{}", err);
+        }
+    }
+
+    unsafe {
+        let thread = ::threads::current_thread();
+        let should_switch = stack_frame.stack_pointer.0 > 0x8000000000 && (*thread).tick() == 0;
         LAPIC_REGISTERS.as_mut().unwrap().eoi();
+        if should_switch {
+            ALL_THREADS.enqueue(|thread_ptr| {
+                *thread_ptr = thread;
+            });
+            let next_thread = {
+                let mut next_thread = 0 as *mut Thread;
+                ALL_THREADS.dequeue(|thread| { next_thread = *thread });
+                next_thread
+            };
+
+            if (next_thread != thread) {
+                (*next_thread).switch_to_thread();
+            }
+            (*thread).reset_ticks();
+        }
     }
 }
 
@@ -309,7 +452,7 @@ macro_rules! unhandled_exception_handler {
 fn install_handlers() {
     unsafe {
         x86_64::instructions::interrupts::disable();
-        IDT.load();
+        IDT.try().unwrap().load();
         x86_64::instructions::interrupts::enable();
     }
 }
@@ -350,6 +493,7 @@ extern fn rust_begin_unwind(
     unsafe {
         use core::fmt::Write;
         let mut writer = serial::SerialWriter::new();
+        let _ = writer.write_fmt(format_args!("PANIC "));
         let _ = writer.write_fmt(msg);
         let _ = writer.write_fmt(format_args!(" in file {} on line {}\n", file, line));
     }

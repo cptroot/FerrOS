@@ -1,5 +1,3 @@
-use x86;
-
 use apic;
 /// Returns whether or not the CPU has a LAPIC
 pub fn cpuid_lapic_present() -> bool {

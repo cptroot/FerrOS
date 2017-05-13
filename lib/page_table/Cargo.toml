@@ -9,5 +9,7 @@ kernel = []
 
 [dependencies]
 x86 = { version = "0.8.0", default-features = false }
+rlibc = "1.0"
+
 mem = { path = "../mem" }
 frame_allocator = { path = "../frame_allocator" }
