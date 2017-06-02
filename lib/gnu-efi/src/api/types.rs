@@ -194,23 +194,21 @@ impl EfiBuffer {
     }
 
     pub fn as_mut_ptr(&mut self) -> *mut u8 {
-        *self.get_mut_pointer()
+        self.get_mut_pointer()
     }
 
     pub fn get_pointer<'a>(&'a self) -> &'a *const u8 {
-        use ::core::ops::Deref;
         unsafe {
-            ::core::mem::transmute(self.buffer.deref())
+            ::core::mem::transmute(self.buffer.get())
         }
     }
 
-    pub fn get_mut_pointer<'a>(&'a mut self) -> &'a *mut u8 {
-        &mut self.buffer
+    pub fn get_mut_pointer(& mut self) -> *mut u8 {
+        self.buffer.get()
     }
 
     pub fn into_raw_parts(self) -> (*mut u8, usize) {
-        use ::core::ops::Deref;
-        let result = (*self.buffer.deref(), self.size);
+        let result = (self.buffer.get(), self.size);
         ::core::mem::forget(self);
         result
     }

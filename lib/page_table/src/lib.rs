@@ -29,7 +29,7 @@ impl PageTable {
         };
         #[cfg(feature = "loader")]
         {
-            *result.pml4.get_mut() = level4::PageMap::new();
+            *result.pml4.as_mut() = level4::PageMap::new();
         }
         #[cfg(feature = "kernel")]
         {
@@ -39,19 +39,19 @@ impl PageTable {
 
     pub fn insert_page(&mut self, frame: ::mem::Frame, page: ::mem::Page, page_size: PageSize) {
         unsafe {
-            (**self.pml4).insert_page(frame, page, page_size);
+            (*self.pml4.as_mut()).insert_page(frame, page, page_size);
         }
     }
 
     pub fn load(&self) {
         unsafe {
             let cr3 = ::x86::shared::control_regs::cr3();
-            ::x86::shared::control_regs::cr3_write(*self.pml4 as usize);
+            ::x86::shared::control_regs::cr3_write(self.pml4.as_ptr() as usize);
         }
     }
 
     pub fn physical_address(&self) -> u32 {
-        (*self.pml4 as usize) as u32
+        (self.pml4.as_ptr() as usize) as u32
     }
 }
 

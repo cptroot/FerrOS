@@ -56,16 +56,16 @@ impl FileProtocol {
         }
     }
 
-    pub fn read<'a>(&mut self, mut size: usize, buffer: &'a *mut u8) -> Result<&'a mut [u8], ::def::Status> {
+    pub fn read(&mut self, mut size: usize, buffer: *mut u8) -> Result<&mut [u8], ::def::Status> {
         let status = ::bind::safe_efi_call3(
             self.Read,
             self,
             &mut size,
-            *buffer);
+            buffer);
 
         if status == ::def::Status::Success {
             unsafe {
-                Ok(::core::slice::from_raw_parts_mut(*buffer, size))
+                Ok(::core::slice::from_raw_parts_mut(buffer, size))
             }
         } else {
             Err(status)
