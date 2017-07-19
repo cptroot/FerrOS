@@ -3,6 +3,9 @@ name = "loader"
 version = "0.1.0"
 authors = ["Evan Davis <edavis@caltech.edu>"]
 
+[profile.release]
+debug = true
+
 [profile.dev]
 opt-level = 1
 
