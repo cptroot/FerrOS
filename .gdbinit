@@ -1,3 +1,4 @@
+python
 
 import gdb
 import elftools
@@ -128,3 +129,5 @@ class ConnectLoaderCommand (gdb.Command):
 # Initialize the command
 ConnectCommand()
 ConnectLoaderCommand()
+
+end
