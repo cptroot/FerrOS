@@ -175,6 +175,7 @@ impl Iterator for InterruptControllers {
     }
 }
 
+#[repr(C)]
 pub struct MultipleApicDescriptionTable {
     header: SystemDescriptionTableHeader,
     _local_interrupt_controller_address: u32,
