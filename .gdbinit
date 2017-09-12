@@ -20,7 +20,7 @@ class ConnectCommand (gdb.Command):
 # Remove the previous symbol tables
         gdb.execute( 'file' )
 # Add debug.efi symbol table
-        gdb.execute( 'file target/debug/debug.efi' )
+        gdb.execute( 'file target_ferros/debug/debug.efi' )
 # Use the symbol table to find what address the while loop has
         gdb.execute( 'info line gdb_stub.c:9' )
 # Load the address into python
@@ -39,7 +39,7 @@ class ConnectCommand (gdb.Command):
 # Use the elf file to load the correct offsets for text and data
         text_offset = 0
         data_offset = 0
-        with open('target/debug/main.so', 'rb') as f:
+        with open('target_ferros/debug/loader.so', 'rb') as f:
             elffile = ELFFile(f)
 
             text_section = elffile.get_section_by_name(b'.text')
@@ -52,7 +52,7 @@ class ConnectCommand (gdb.Command):
         data_addr = base_address + data_offset
 
 # load the symbols
-        gdb.execute( 'add-symbol-file target/debug/debug.efi 0x%x -s .data 0x%x' % (text_addr, data_addr) )
+        gdb.execute( 'add-symbol-file target_ferros/debug/debug.efi 0x%x -s .data 0x%x' % (text_addr, data_addr) )
 
 # unpause the program
         gdb.execute( 'set variable *(int *)($rbp - 0x4) = 0' )
@@ -66,7 +66,7 @@ class ConnectCommand (gdb.Command):
         gdb.execute( 'c' )
 
 # jump to the kernel
-        gdb.execute( 'file target/debug/kernel.so' )
+        gdb.execute( 'file target_ferros/debug/kernel.so' )
         gdb.Breakpoint('kernel::kernel_entry', internal=True, temporary=True)
         gdb.execute( 'c' )
 
@@ -82,7 +82,7 @@ class ConnectLoaderCommand (gdb.Command):
 # Remove the previous symbol tables
         gdb.execute( 'file' )
 # Add debug.efi symbol table
-        gdb.execute( 'file target/debug/debug.efi' )
+        gdb.execute( 'file target_ferros/debug/debug.efi' )
 # Use the symbol table to find what address the while loop has
         gdb.execute( 'info line gdb_stub.c:9' )
 # Load the address into python
@@ -101,7 +101,7 @@ class ConnectLoaderCommand (gdb.Command):
 # Use the elf file to load the correct offsets for text and data
         text_offset = 0
         data_offset = 0
-        with open('target/debug/main.so', 'rb') as f:
+        with open('target_ferros/debug/loader.so', 'rb') as f:
             elffile = ELFFile(f)
 
             text_section = elffile.get_section_by_name(b'.text')
@@ -114,7 +114,7 @@ class ConnectLoaderCommand (gdb.Command):
         data_addr = base_address + data_offset
 
 # load the symbols
-        gdb.execute( 'add-symbol-file target/debug/debug.efi 0x%x -s .data 0x%x' % (text_addr, data_addr) )
+        gdb.execute( 'add-symbol-file target_ferros/debug/debug.efi 0x%x -s .data 0x%x' % (text_addr, data_addr) )
 
 # unpause the program
         gdb.execute( 'set variable *(int *)($rbp - 0x4) = 0' )

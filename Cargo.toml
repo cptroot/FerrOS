@@ -1,0 +1,8 @@
+[package]
+name = "ferros"
+version = "0.1.0"
+authors = ["Evan Davis <edavis@caltech.edu>"]
+
+[dependencies]
+clap = "~2.25.1"
+
