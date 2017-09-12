@@ -184,7 +184,7 @@ impl EfiBuffer {
 
     pub unsafe fn new(pointer: *mut u8, size: usize) -> EfiBuffer {
         EfiBuffer {
-            buffer: ::core::nonzero::NonZero::new(pointer),
+            buffer: ::core::nonzero::NonZero::new(pointer).unwrap(),
             size: size,
         }
     }

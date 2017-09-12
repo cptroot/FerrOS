@@ -25,7 +25,7 @@ impl PageTable {
     pub unsafe fn new(frame: ::mem::Frame) -> PageTable {
         let mut physical_address: ::mem::PhysicalAddress = frame.into();
         let mut result = PageTable {
-            pml4: Unique::new(physical_address.as_mut_ptr() as *mut level4::PageMap),
+            pml4: Unique::new(physical_address.as_mut_ptr() as *mut level4::PageMap).unwrap(),
         };
         #[cfg(feature = "loader")]
         {

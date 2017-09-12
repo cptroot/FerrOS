@@ -1,2 +1,5 @@
+
+
 [target.x86_64-unknown-pintos.dependencies]
-compiler_builtins = {}
+core = { stage = 0 }
+compiler_builtins = { stage = 1 }

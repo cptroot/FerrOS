@@ -391,6 +391,14 @@ fn divide_by_zero() {
 use x86_64::structures::idt::{ExceptionStackFrame, PageFaultErrorCode};
 
 extern "x86-interrupt" fn page_fault_handler(stack_frame: &mut ExceptionStackFrame, error_code: PageFaultErrorCode) {
+    unsafe {
+        use ::core::fmt::Write;
+        let mut writer = serial::SerialWriter::new_init();
+        if let Err(err) = writer.write_fmt(format_args!("stack_frame: {:?}", *stack_frame)) {
+            panic!("{}", err);
+        }
+    }
+
     let cr2: usize = unsafe {
         let result: usize;
         asm!("\
@@ -402,7 +410,13 @@ extern "x86-interrupt" fn page_fault_handler(stack_frame: &mut ExceptionStackFra
 }
 
 fn print_something_else(cr2: usize) {
-    println!("Page fault address: {:x}", cr2);
+    unsafe {
+        use ::core::fmt::Write;
+        let mut writer = serial::SerialWriter::new_init();
+        if let Err(err) = writer.write_fmt(format_args!("Page fault address: {:x}", cr2)) {
+            panic!("{}", err);
+        }
+    }
 }
 
 extern "x86-interrupt" fn timer_handler(stack_frame: &mut ExceptionStackFrame) {

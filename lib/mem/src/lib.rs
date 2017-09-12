@@ -25,7 +25,7 @@ pub struct Page {
 impl Page {
     pub fn new(page: usize) -> Page {
         Page {
-            page: page,
+            page,
         }
     }
 }
@@ -64,7 +64,7 @@ pub struct PageOffset {
 impl PageOffset {
     pub fn new(page_offset: isize) -> Self {
         PageOffset {
-            page_offset: page_offset,
+            page_offset,
         }
     }
 }
@@ -98,41 +98,12 @@ impl<'a> ::core::ops::Add<&'a PageOffset> for &'a PageOffset {
 }
 
 impl ::core::iter::Step for PageOffset {
-    fn step(&self, by: &Self) -> Option<Self> {
-        isize::checked_add(self.page_offset, by.page_offset).map(
-            |page_offset| {
-                PageOffset {
-                    page_offset: page_offset,
-                }
-            })
-    }
-
-    fn steps_between(start: &Self, end: &Self, by: &Self) -> Option<usize> {
-        if by.page_offset < 0 {
-            if start.page_offset < end.page_offset {
-                None
-            } else {
-                Some(((start.page_offset - end.page_offset) as usize + (-by.page_offset) as usize - 1) / (-by.page_offset) as usize)
-            }
-        } else {
-            if start.page_offset > end.page_offset {
-                None
-            } else {
-                Some(((end.page_offset - start.page_offset) as usize + by.page_offset as usize - 1) / by.page_offset as usize)
-            }
-        }
-    }
-
-    fn steps_between_by_one(start: &Self, end: &Self) -> Option<usize> {
+    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
         if start.page_offset > end.page_offset {
             None
         } else {
             Some((start.page_offset - end.page_offset) as usize)
         }
-    }
-
-    fn is_negative(&self) -> bool {
-        self.page_offset < 0
     }
 
     fn replace_one(&mut self) -> Self {
@@ -156,6 +127,16 @@ impl ::core::iter::Step for PageOffset {
             page_offset: self.page_offset - 1,
         }
     }
+
+    fn add_usize(&self, n: usize) -> Option<Self> {
+        isize::checked_add(self.page_offset, n as isize).map(
+            |page_offset| {
+                PageOffset {
+                    page_offset,
+                }
+            }
+        )
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -166,7 +147,7 @@ pub struct Frame {
 impl Frame {
     pub fn new(frame: usize) -> Frame {
         Frame {
-            frame: frame,
+            frame,
         }
     }
 }
@@ -205,7 +186,7 @@ pub struct FrameOffset {
 impl FrameOffset {
     pub fn new(frame_offset: isize) -> Self {
         FrameOffset {
-            frame_offset: frame_offset,
+            frame_offset,
         }
     }
 }
@@ -218,7 +199,7 @@ pub struct PhysicalAddress {
 impl PhysicalAddress {
     pub fn new(address: usize) -> Self {
         PhysicalAddress {
-            address: address,
+            address,
         }
     }
 
@@ -259,7 +240,7 @@ pub struct VirtualAddress {
 impl VirtualAddress {
     pub fn new(address: usize) -> Self {
         VirtualAddress {
-            address: address,
+            address,
         }
     }
 
@@ -294,7 +275,7 @@ pub struct VirtualAddressOffset {
 impl VirtualAddressOffset {
     pub fn new(address_offset: isize) -> Self {
         VirtualAddressOffset {
-            address_offset: address_offset,
+            address_offset,
         }
     }
 }
