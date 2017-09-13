@@ -16,6 +16,9 @@ fn main() {
         .subcommand(SubCommand::with_name("build")
             .about("Builds FerrOS")
             .version("0.1"))
+        .subcommand(SubCommand::with_name("check")
+            .about("Runs the typecheck part of building FerrOS")
+            .version("0.1"))
         .subcommand(SubCommand::with_name("clean")
             .about("Cleans FerrOS artifacts")
             .version("0.1"))
@@ -30,6 +33,9 @@ fn main() {
         },
         Some("build") => {
             build();
+        },
+        Some("check") => {
+            check();
         },
         Some("clean") => {
             clean();
@@ -265,6 +271,27 @@ fn build() -> bool {
     }
 
     return false;
+}
+
+fn check() {
+    let mut loader = Command::new("xargo")
+        .env("RUST_TARGET_PATH", std::env::current_dir().expect("can't retrieve the current directory"))
+        .current_dir("./loader")
+        .arg("check")
+        .args(&["--target", "x86_64-unknown-pintos"])
+        .spawn()
+        .expect("failed to run xargo");
+    let loader_success = loader.wait().map(|status| status.success()).unwrap_or(false);
+
+    let mut kernel = Command::new("xargo")
+        .env("RUST_TARGET_PATH", std::env::current_dir().expect("can't retrieve the current directory"))
+        .current_dir("./kernel")
+        .arg("check")
+        .args(&["--target", "x86_64-unknown-pintos"])
+        .spawn()
+        .expect("failed to run xargo");
+
+    let kernel_success = kernel.wait().map(|status| status.success()).unwrap_or(false);
 }
 
 fn run(uefi_img: Option<&str>) {
