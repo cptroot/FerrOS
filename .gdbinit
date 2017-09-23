@@ -42,8 +42,8 @@ class ConnectCommand (gdb.Command):
         with open('target_ferros/debug/loader.so', 'rb') as f:
             elffile = ELFFile(f)
 
-            text_section = elffile.get_section_by_name(b'.text')
-            data_section = elffile.get_section_by_name(b'.data')
+            text_section = elffile.get_section_by_name('.text')
+            data_section = elffile.get_section_by_name('.data')
             text_offset = text_section['sh_addr']
             data_offset = data_section['sh_addr']
 
@@ -52,7 +52,8 @@ class ConnectCommand (gdb.Command):
         data_addr = base_address + data_offset
 
 # load the symbols
-        gdb.execute( 'add-symbol-file target_ferros/debug/debug.efi 0x%x -s .data 0x%x' % (text_addr, data_addr) )
+        gdb.execute( 'add-symbol-file target_ferros/debug/debug.efi 0x%x -s .data 0x%x' % \
+            (int(text_addr), int(data_addr)) )
 
 # unpause the program
         gdb.execute( 'set variable *(int *)($rbp - 0x4) = 0' )
@@ -104,8 +105,8 @@ class ConnectLoaderCommand (gdb.Command):
         with open('target_ferros/debug/loader.so', 'rb') as f:
             elffile = ELFFile(f)
 
-            text_section = elffile.get_section_by_name(b'.text')
-            data_section = elffile.get_section_by_name(b'.data')
+            text_section = elffile.get_section_by_name('.text')
+            data_section = elffile.get_section_by_name('.data')
             text_offset = text_section['sh_addr']
             data_offset = data_section['sh_addr']
 
@@ -114,7 +115,7 @@ class ConnectLoaderCommand (gdb.Command):
         data_addr = base_address + data_offset
 
 # load the symbols
-        gdb.execute( 'add-symbol-file target_ferros/debug/debug.efi 0x%x -s .data 0x%x' % (text_addr, data_addr) )
+        gdb.execute( 'add-symbol-file target_ferros/debug/debug.efi 0x%x -s .data 0x%x' % (int(text_addr), int(data_addr)) )
 
 # unpause the program
         gdb.execute( 'set variable *(int *)($rbp - 0x4) = 0' )

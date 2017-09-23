@@ -48,7 +48,7 @@ pub extern fn rust_main(image_handle:gnu_efi::def::Handle,
     // Get all handles supporting simple_file_protocol
     let handles = system_table.boot_services.retrieve_handles_with_protocol::<gnu_efi::api::protocol::SimpleFileSystemProtocol>();
 
-    let size = 512000;
+    let size = 5120000;
     if let Ok(mut buffer) = system_table.boot_services.allocate_pages((size + 0x200) / 0x200) {
         // Retrieve the kernel efi file
         let file = handles.unwrap().iter().filter_map(|handle| -> Option<&mut gnu_efi::api::protocol::SimpleFileSystemProtocol> {
