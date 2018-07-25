@@ -1,21 +1,22 @@
 #![no_std]
+#![feature(const_fn)]
 
 extern crate mem;
 
 use ::mem::{Frame, PhysicalAddress};
-
-/* Frame 1 is unused, frame 2 is for the AP Trampoline, and frame 3
- * is the AP Trampoline stack
- */
-pub static mut FRAME_ALLOCATOR: FrameAllocator = FrameAllocator {
-    next_frame: 4,
-};
+use ::core::ops::DerefMut;
 
 pub struct FrameAllocator {
     next_frame: usize,
 }
 
 impl FrameAllocator {
+    pub const fn new() -> FrameAllocator {
+        FrameAllocator {
+            next_frame: 5,
+        }
+    }
+
     pub fn get_frame(&mut self) -> Frame {
         let result = Frame::new(self.next_frame);
         self.next_frame += 1;
@@ -27,4 +28,9 @@ impl FrameAllocator {
         self.next_frame += num_frames;
         result
     }
+}
+
+pub trait FrameGetter {
+    type FrameLock: DerefMut<Target = FrameAllocator>;
+    fn get_frame_allocator() -> Self::FrameLock;
 }

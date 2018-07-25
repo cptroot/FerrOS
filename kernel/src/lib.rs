@@ -1,15 +1,15 @@
 #![feature(lang_items)]
 #![feature(asm)]
+#![feature(abi_x86_interrupt)]
 #![feature(plugin)]
+#![feature(unique)]
 #![feature(compiler_builtins_lib)]
 #![feature(core_intrinsics)]
 #![feature(const_fn)]
-#![feature(abi_x86_interrupt)]
+#![feature(const_unsafe_cell_new)]
 #![no_std]
 
 extern crate compiler_builtins;
-#[macro_use]
-extern crate lazy_static;
 
 // Pulls in memset, memcmp, memcpy
 extern crate rlibc;
@@ -36,6 +36,8 @@ extern crate frame_allocator as falloc;
 
 extern crate page_table;
 
+mod palloc;
+
 // bindings to cpuid
 mod asm_routines;
 
@@ -44,23 +46,35 @@ mod once_mut;
 // Code for modifying and using IDT
 //mod interrupt;
 
+mod interrupts;
+
 mod threads;
 
 mod apic;
 
-static IDT: once_mut::OnceMut<x86_64::structures::idt::Idt> = once_mut::OnceMut::new();
-lazy_static! {
-    static ref PAGE_TABLE: spin::Mutex<page_table::PageTable> = spin::Mutex::new(unsafe { ::core::mem::replace(&mut PAGE_TABLE_MUT, None).unwrap() });
+mod initialize_once;
+
+mod per_cpu;
+
+use core::sync::atomic::AtomicUsize;
+
+use interrupts::{SingleExecution, InterruptGuard};
+use initialize_once::InitializeOnce;
+
+static IDT: InitializeOnce<x86_64::structures::idt::Idt> = InitializeOnce::new();
+static PAGE_TABLE: InitializeOnce<spin::Mutex<page_table::PageTable>> = InitializeOnce::new();
+struct FramePlace;
+impl ::falloc::FrameGetter for FramePlace {
+    type FrameLock = spin::MutexGuard<'static, ::falloc::FrameAllocator>;
+    fn get_frame_allocator() -> Self::FrameLock {
+        FRAME_ALLOCATOR.lock()
+    }
 }
+static FRAME_ALLOCATOR: InitializeOnce<spin::Mutex<::falloc::FrameAllocator>> = InitializeOnce::new();
 
 static mut LAPIC_REGISTERS: Option<apic::LapicRegisters> = None;
 
-static mut PAGE_TABLE_MUT: Option<page_table::PageTable> = None;
-
-use atomic_ring_buffer::AtomicRingBuffer;
-use threads::Thread;
-static ALL_THREADS: AtomicRingBuffer<*mut Thread, [*mut Thread; 4]> =
-    AtomicRingBuffer::new([0 as *mut Thread; 4]);
+static PROCESSOR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /*
 pub fn initialize_statics(mut page_table: page_table::PageTable) {
@@ -68,8 +82,8 @@ pub fn initialize_statics(mut page_table: page_table::PageTable) {
 }
 */
 
-pub fn initialize_idt(idt: &mut x86_64::structures::idt::Idt) {
-    *idt = x86_64::structures::idt::Idt::new();
+pub fn initialize_idt(single_execution: &SingleExecution) {
+    let mut idt = x86_64::structures::idt::Idt::new();
     idt.divide_by_zero.set_handler_fn(divide_by_zero_handler);
     idt.debug.set_handler_fn(debug_exception_handler);
     idt.breakpoint.set_handler_fn(breakpoint_handler);
@@ -90,6 +104,8 @@ pub fn initialize_idt(idt: &mut x86_64::structures::idt::Idt) {
     idt.virtualization.set_handler_fn(virtualization_exception_handler);
     idt.interrupts[0].set_handler_fn(timer_handler);
     idt.interrupts[0xdf].set_handler_fn(spurious_interrupt_handler);
+
+    IDT.initialize(single_execution, idt);
 }
 
 /// This is the entry point for the rust language part of the
@@ -101,16 +117,19 @@ pub extern fn kernel_entry(
     mut frame_allocator: falloc::FrameAllocator,
     page_table: page_table::PageTable)
         -> ! {
-    unsafe {
-        ::core::mem::replace(&mut PAGE_TABLE_MUT, Some(page_table));
-    }
-    ::lazy_static::initialize(&PAGE_TABLE);
+    let single_execution = unsafe {
+        SingleExecution::new()
+    };
+    let interrupt_guard = interrupts::disable();
+
+    PAGE_TABLE.initialize(&single_execution, ::spin::Mutex::new(page_table));
+    FRAME_ALLOCATOR.initialize(&single_execution, ::spin::Mutex::new(frame_allocator));
 
     // Initialize the GDT
     unsafe {
         use x86::shared::segmentation::{SegmentDescriptor};
         use x86::shared::dtables::DescriptorTablePointer;
-        let gdt_frame = frame_allocator.get_frame();
+        let gdt_frame = FRAME_ALLOCATOR.lock().get_frame();
         let gdt_frame_num: usize = gdt_frame.into();
         let gdt_page = ::mem::Page::new(gdt_frame_num);
         let mut gdt_address: mem::VirtualAddress = gdt_page.into();
@@ -147,21 +166,14 @@ pub extern fn kernel_entry(
 
     }
     // Override IDT
-    IDT.call_once(initialize_idt);
+    initialize_idt(&single_execution);
     install_handlers();
 
-    println!("");
+    //println!("");
 
     //divide_by_zero();
 
-    /*unsafe {
-        let ptr: *mut u8 = 0x0 as *mut u8;
-        *ptr = 0;
-    }*/
-
-    unsafe {
-        core::mem::replace(&mut falloc::FRAME_ALLOCATOR, frame_allocator);
-    }
+    //page_fault();
 
     if asm_routines::cpuid_lapic_present() {
         println!("lapic present");
@@ -223,6 +235,13 @@ pub extern fn kernel_entry(
     lapic_registers.page_in(&mut *PAGE_TABLE.lock());
 
     println!("lapic APIC ID: {:x}", lapic_registers.get_apic_id_register());
+
+    // Initialize Per Cpu Data Blocks
+    unsafe {
+        ::per_cpu::initialize_per_cpu(&single_execution, 2);
+    }
+
+    // Send startup IPI
     unsafe {
         let address: *mut u32 = 0x3100 as *mut u32;
         *address = PAGE_TABLE.lock().physical_address();
@@ -243,26 +262,53 @@ pub extern fn kernel_entry(
         }
     }
 
-    let first_thread = unsafe {
-        let page = ::mem::Page::new(0x80_0010_0);
-        let frame = ::falloc::FRAME_ALLOCATOR.get_frame();
+    // Set the Processor ID
+    {
+        // Get a new processor ID
+        let processor_id = PROCESSOR_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        // Store the Processor ID into rdtscp MSR
+        unsafe {
+            ::per_cpu::write_processor_id(::per_cpu::ProcessorId::new(processor_id as u64));
+        }
+    }
 
-        PAGE_TABLE.lock().insert_page(frame, page, ::page_table::PageSize::FourKb);
+    // Create the Idle thread for this processor
+    let idle_thread = {
+        let page = ::mem::Page::new(0x80_0040_0);
+        let frame = FRAME_ALLOCATOR.lock().get_frame();
+
+        PAGE_TABLE.lock().insert_page::<FramePlace>(frame, page, ::page_table::PageSize::FourKb);
 
         let page_vaddr: ::mem::VirtualAddress = page.into();
         let addr_usize: usize = page_vaddr.into();
         let thread: *mut threads::Thread = addr_usize as *mut threads::Thread;
 
-        threads::Thread::new_in_place(thread, count_up);
+        threads::Thread::new_in_place_no_insert(thread, threads::idle_thread);
+
+        thread
+    };
+    ::per_cpu::retrieve_per_cpu(&interrupt_guard).set_idle_thread(&single_execution, idle_thread);
+
+    let first_thread = {
+        let page = ::mem::Page::new(0x80_0010_0);
+        let frame = FRAME_ALLOCATOR.lock().get_frame();
+
+        PAGE_TABLE.lock().insert_page::<FramePlace>(frame, page, ::page_table::PageSize::FourKb);
+
+        let page_vaddr: ::mem::VirtualAddress = page.into();
+        let addr_usize: usize = page_vaddr.into();
+        let thread: *mut threads::Thread = addr_usize as *mut threads::Thread;
+
+        threads::Thread::new_in_place_no_insert(thread, count_up);
 
         thread
     };
 
-    unsafe {
+    {
         let page = ::mem::Page::new(0x80_0030_0);
-        let frame = ::falloc::FRAME_ALLOCATOR.get_frame();
+        let frame = FRAME_ALLOCATOR.lock().get_frame();
 
-        PAGE_TABLE.lock().insert_page(frame, page, ::page_table::PageSize::FourKb);
+        PAGE_TABLE.lock().insert_page::<FramePlace>(frame, page, ::page_table::PageSize::FourKb);
 
         let page_vaddr: ::mem::VirtualAddress = page.into();
         let addr_usize: usize = page_vaddr.into();
@@ -270,7 +316,19 @@ pub extern fn kernel_entry(
 
         threads::Thread::new_in_place(thread, up_down);
 
-        ALL_THREADS.enqueue(|thread_ptr| { *thread_ptr = thread; });
+    }
+    {
+        let page = ::mem::Page::new(0x80_0050_0);
+        let frame = FRAME_ALLOCATOR.lock().get_frame();
+
+        PAGE_TABLE.lock().insert_page::<FramePlace>(frame, page, ::page_table::PageSize::FourKb);
+
+        let page_vaddr: ::mem::VirtualAddress = page.into();
+        let addr_usize: usize = page_vaddr.into();
+        let thread: *mut threads::Thread = addr_usize as *mut threads::Thread;
+
+        threads::Thread::new_in_place(thread, some_counting);
+
     }
 
     unsafe {
@@ -280,15 +338,17 @@ pub extern fn kernel_entry(
     }
 
     unsafe {
-        (*first_thread).start_first_thread();
+        (*first_thread).start_first_thread(single_execution);
     }
 
+    /*
     // Shutdown the computer
     system_table.runtime_services.reset_system(
         gnu_efi::api::ResetType::ResetShutdown,
         gnu_efi::def::Status::Success,
         0,
         core::ptr::null());
+    */
 }
 
 fn up_down() {
@@ -329,10 +389,22 @@ fn count_down() {
     }
 }
 
+fn some_counting() {
+    let mut i = 0;
+    let mut j = 10;
+    while j > 0 {
+        i = 0;
+        while i < 1000000 {
+            i += 1;
+        }
+        j -= 1;
+    }
+}
+
 fn ap_initialize_idt() {
     unsafe {
         x86_64::instructions::interrupts::disable();
-        IDT.try().unwrap().load();
+        IDT.load();
         x86_64::instructions::interrupts::enable();
     }
     println!("idt installed");
@@ -355,31 +427,54 @@ fn ap_initialize_timer() {
     }
 }
 
-fn ap_initialize_thread() -> ! {
-    unsafe {
+fn ap_initialize_thread(single_execution: &SingleExecution, interrupt_guard: &InterruptGuard) {
+    let idle_thread = {
         let page = ::mem::Page::new(0x80_0020_0);
-        let frame = ::falloc::FRAME_ALLOCATOR.get_frame();
+        let frame = FRAME_ALLOCATOR.lock().get_frame();
 
-        PAGE_TABLE.lock().insert_page(frame, page, ::page_table::PageSize::FourKb);
+        PAGE_TABLE.lock().insert_page::<FramePlace>(frame, page, ::page_table::PageSize::FourKb);
 
         let page_vaddr: ::mem::VirtualAddress = page.into();
         let addr_usize: usize = page_vaddr.into();
         let thread: *mut threads::Thread = addr_usize as *mut threads::Thread;
 
-        threads::Thread::new_in_place(thread, count_down);
+        threads::Thread::new_in_place_no_insert(thread, threads::idle_thread);
 
-        (*thread).start_first_thread();
+        thread
+    };
+    ::per_cpu::retrieve_per_cpu(interrupt_guard).set_idle_thread(single_execution, idle_thread);
+}
+
+fn ap_start_scheduler(single_execution: SingleExecution, interrupt_guard: InterruptGuard) -> ! {
+    let thread = *::per_cpu::retrieve_per_cpu(&interrupt_guard).get_idle_thread();
+    ::core::mem::drop(interrupt_guard);
+    unsafe {
+        (*thread).start_first_thread(single_execution);
     }
 }
 
 fn ap_bootstrap() -> ! {
     println!("hello from processor 2");
 
+    let interrupt_guard = interrupts::disable();
+    let single_execution = unsafe {
+        SingleExecution::new()
+    };
+
+    // Set the Processor ID
+    {
+        // Get a new processor ID
+        let processor_id = PROCESSOR_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        // Store the Processor ID into rdtscp MSR
+        unsafe {
+            ::per_cpu::write_processor_id(::per_cpu::ProcessorId::new(processor_id as u64));
+        }
+    }
+
     ap_initialize_idt();
-
     ap_initialize_timer();
-
-    ap_initialize_thread();
+    ap_initialize_thread(&single_execution, &interrupt_guard);
+    ap_start_scheduler(single_execution, interrupt_guard);
 }
 
 fn divide_by_zero() {
@@ -388,13 +483,19 @@ fn divide_by_zero() {
     }
 }
 
+fn page_fault() {
+    unsafe {
+        asm!("movq $$0, %rax; movq (%rax), %rax")
+    }
+}
+
 use x86_64::structures::idt::{ExceptionStackFrame, PageFaultErrorCode};
 
-extern "x86-interrupt" fn page_fault_handler(stack_frame: &mut ExceptionStackFrame, error_code: PageFaultErrorCode) {
+extern "x86-interrupt" fn page_fault_handler(stack_frame: &mut ExceptionStackFrame, _error_code: PageFaultErrorCode) {
     unsafe {
         use ::core::fmt::Write;
         let mut writer = serial::SerialWriter::new_init();
-        if let Err(err) = writer.write_fmt(format_args!("stack_frame: {:?}", *stack_frame)) {
+        if let Err(err) = writer.write_fmt(format_args!("stack_frame: {:?}\n", *stack_frame)) {
             panic!("{}", err);
         }
     }
@@ -420,6 +521,9 @@ fn print_something_else(cr2: usize) {
 }
 
 extern "x86-interrupt" fn timer_handler(stack_frame: &mut ExceptionStackFrame) {
+    let interrupt_guard = unsafe {
+        interrupts::InterruptGuard::new(interrupts::InterruptState::Disabled)
+    };
     unsafe {
         use ::core::fmt::Write;
         let mut writer = serial::SerialWriter::new_init();
@@ -428,24 +532,15 @@ extern "x86-interrupt" fn timer_handler(stack_frame: &mut ExceptionStackFrame) {
         }
     }
 
+    let thread = ::threads::current_thread(&interrupt_guard);
+    let should_schedule = stack_frame.stack_pointer.0 > 0x8000000000 && (*thread).tick() == 0;
     unsafe {
-        let thread = ::threads::current_thread();
-        let should_switch = stack_frame.stack_pointer.0 > 0x8000000000 && (*thread).tick() == 0;
+        // Because we eoi here, this means that if we don't schedule fast enough we can get bitten
+        // by another timer interrupt. Might have to add code to the timer interrupt to deal with
+        // that fact
         LAPIC_REGISTERS.as_mut().unwrap().eoi();
-        if should_switch {
-            ALL_THREADS.enqueue(|thread_ptr| {
-                *thread_ptr = thread;
-            });
-            let next_thread = {
-                let mut next_thread = 0 as *mut Thread;
-                ALL_THREADS.dequeue(|thread| { next_thread = *thread });
-                next_thread
-            };
-
-            if (next_thread != thread) {
-                (*next_thread).switch_to_thread();
-            }
-            (*thread).reset_ticks();
+        if should_schedule {
+            thread.schedule(threads::Status::Ready);
         }
     }
 }
@@ -466,7 +561,7 @@ macro_rules! unhandled_exception_handler {
 fn install_handlers() {
     unsafe {
         x86_64::instructions::interrupts::disable();
-        IDT.try().unwrap().load();
+        IDT.load();
         x86_64::instructions::interrupts::enable();
     }
 }
@@ -496,11 +591,11 @@ unhandled_exception_handler!(spurious_interrupt_handler);
 /// unwinding of panics.
 #[cfg(not(test))]
 #[no_mangle]
-#[lang = "eh_personality"] extern fn rust_eh_personality() {}
+#[lang = "eh_personality"] pub extern fn rust_eh_personality() {}
 #[cfg(not(test))]
 #[lang = "panic_fmt"]
 #[no_mangle]
-extern fn rust_begin_unwind(
+pub extern fn rust_begin_unwind(
         msg: core::fmt::Arguments,
         file: &'static str,
         line: u32) -> ! {

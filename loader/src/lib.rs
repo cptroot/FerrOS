@@ -31,6 +31,19 @@ extern crate elf;
 
 static mut INIT_RAM_PAGES: usize = 0;
 
+static mut FRAME_ALLOCATOR: ::falloc::FrameAllocator = ::falloc::FrameAllocator::new();
+
+struct FramePlace;
+
+impl ::falloc::FrameGetter for FramePlace {
+    type FrameLock = &'static mut ::falloc::FrameAllocator;
+    fn get_frame_allocator() -> Self::FrameLock {
+        unsafe {
+            &mut FRAME_ALLOCATOR
+        }
+    }
+}
+
 struct StackData {
     elf_file: elf::File<'static>,
     page_table: page_table::PageTable,
@@ -95,7 +108,7 @@ pub extern fn rust_main(image_handle:gnu_efi::def::Handle,
             // Initialize page table
             let mut page_table = unsafe {
                 page_table::PageTable::new(
-                    falloc::FRAME_ALLOCATOR.get_frame())
+                    FRAME_ALLOCATOR.get_frame())
             };
 
             {
@@ -122,7 +135,7 @@ pub extern fn rust_main(image_handle:gnu_efi::def::Handle,
                             let new_page = page_start + mem::PageOffset::new(offset);
                             let new_frame = frame_start + mem::FrameOffset::new(offset);
 
-                            page_table.insert_page(new_frame, new_page, page_table::PageSize::FourKb);
+                            page_table.insert_page::<FramePlace>(new_frame, new_page, page_table::PageSize::FourKb);
                         }
                     }
                 }
@@ -135,7 +148,7 @@ pub extern fn rust_main(image_handle:gnu_efi::def::Handle,
 
                 let start_page: usize = 0;
                 for offset in 1..INIT_RAM_PAGES {
-                    page_table.insert_page(
+                    page_table.insert_page::<FramePlace>(
                         mem::Frame::new(start_page + offset),
                         mem::Page::new(start_page + offset),
                         page_table::PageSize::FourKb);
@@ -230,7 +243,7 @@ fn new_stack(elf_file: elf::File, mut page_table: page_table::PageTable, system_
                     let start_virtual_address = mem::VirtualAddress::new(section_header.virtual_address as usize);
                     start_virtual_address.into()
                 };
-                let start_frame: mem::Frame = unsafe { falloc::FRAME_ALLOCATOR.get_multiple_frames(num_pages_isize as usize) };
+                let start_frame: mem::Frame = unsafe { FRAME_ALLOCATOR.get_multiple_frames(num_pages_isize as usize) };
 
                 for offset in 0..num_pages_isize {
                     let page = start_page + mem::PageOffset::new(offset);
@@ -238,7 +251,7 @@ fn new_stack(elf_file: elf::File, mut page_table: page_table::PageTable, system_
 
                     println!("map page {:?} into frame {:?}", page, frame);
 
-                    page_table.insert_page(frame, page, page_table::PageSize::FourKb);
+                    page_table.insert_page::<FramePlace>(frame, page, page_table::PageSize::FourKb);
                 }
             },
             _ => {},
@@ -268,7 +281,7 @@ fn run_kernel(entry: extern fn(system_table:&gnu_efi::api::SystemTable, falloc::
     // Jump to entry
     let frame_allocator = unsafe {
         core::mem::replace(
-            &mut falloc::FRAME_ALLOCATOR,
+            &mut FRAME_ALLOCATOR,
             core::mem::uninitialized() )
     };
     entry(system_table,

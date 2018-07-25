@@ -6,6 +6,7 @@ extern crate rlibc;
 
 extern crate mem;
 extern crate frame_allocator as falloc;
+use falloc::FrameGetter;
 
 
 use core::ptr::Unique;
@@ -37,15 +38,15 @@ impl PageTable {
         result
     }
 
-    pub fn insert_page(&mut self, frame: ::mem::Frame, page: ::mem::Page, page_size: PageSize) {
+    pub fn insert_page<T: FrameGetter>(&mut self, frame: ::mem::Frame, page: ::mem::Page, page_size: PageSize) {
         unsafe {
-            (*self.pml4.as_mut()).insert_page(frame, page, page_size);
+            (*self.pml4.as_mut()).insert_page::<T>(frame, page, page_size);
         }
     }
 
     pub fn load(&self) {
         unsafe {
-            let cr3 = ::x86::shared::control_regs::cr3();
+            //let cr3 = ::x86::shared::control_regs::cr3();
             ::x86::shared::control_regs::cr3_write(self.pml4.as_ptr() as usize);
         }
     }
@@ -56,8 +57,11 @@ impl PageTable {
 }
 
 mod level4 {
+    use core::ops::DerefMut;
     use ::mem::{Frame, Page};
+    use ::falloc::FrameGetter;
     use super::{level3, PageEntryBuilder, ReadWrite, PageSize};
+
 
     pub struct PageMap {
         table: [GenericPageEntry; 0x200],
@@ -70,7 +74,7 @@ mod level4 {
             }
         }
 
-        pub fn insert_page(&mut self, frame: Frame, page: Page, page_size: PageSize) {
+        pub fn insert_page<T: FrameGetter>(&mut self, frame: Frame, page: Page, page_size: PageSize) {
             let index = {
                 let virtual_address: ::mem::VirtualAddress = page.into();
                 let virtual_address: usize = virtual_address.into();
@@ -78,7 +82,7 @@ mod level4 {
             };
             if let PageEntryType::NotPresent(_) = self.table[index].as_enum() {
                 // Insert new page map level 3
-                let frame = unsafe { ::falloc::FRAME_ALLOCATOR.get_frame() };
+                let frame = <T as FrameGetter>::get_frame_allocator().deref_mut().get_frame();
                 let physical_address: ::mem::PhysicalAddress = frame.into();
                 let ptr = physical_address.as_ptr() as *mut level3::PageMap;
                 level3::PageMap::new_in_place(ptr);
@@ -86,7 +90,7 @@ mod level4 {
                 self.table[index] = PageTableEntry::new(frame).into();
             }
 
-            self.table[index].get_map().insert_page(frame, page, page_size);
+            self.table[index].get_map().insert_page::<T>(frame, page, page_size);
         }
     }
 
@@ -98,7 +102,7 @@ mod level4 {
     impl GenericPageEntry {
         pub fn empty() -> Self {
             GenericPageEntry {
-                entry: 0
+                entry: 0,
             }
         }
 
@@ -171,7 +175,9 @@ mod level4 {
 }
 
 mod level3 {
+    use core::ops::DerefMut;
     use ::mem::{Frame, Page};
+    use ::falloc::FrameGetter;
     use super::{level2, PageEntryBuilder, ReadWrite, PageSize};
 
     pub struct PageMap {
@@ -185,7 +191,7 @@ mod level3 {
             }
         }
 
-        pub fn insert_page(&mut self, frame: Frame, page: Page, page_size: PageSize) {
+        pub fn insert_page<T: FrameGetter>(&mut self, frame: Frame, page: Page, page_size: PageSize) {
             let index = {
                 let virtual_address: ::mem::VirtualAddress = page.into();
                 let virtual_address: usize = virtual_address.into();
@@ -204,7 +210,7 @@ mod level3 {
                 (_, PageEntryType::NotPresent(_)) => {
                     // Insert a new page table entry
                     let entry = {
-                        let frame = unsafe { ::falloc::FRAME_ALLOCATOR.get_frame() };
+                        let frame = <T as FrameGetter>::get_frame_allocator().deref_mut().get_frame();
                         let physical_address: ::mem::PhysicalAddress = frame.into();
                         let entry = PageTableEntry::new(frame);
                         self.table[index] = entry.into();
@@ -214,10 +220,10 @@ mod level3 {
                         entry
                     };
                         
-                    entry.get_map().insert_page(frame, page, page_size);
+                    entry.get_map().insert_page::<T>(frame, page, page_size);
                 },
                 (_, PageEntryType::PageTableEntry(entry)) => {
-                    entry.get_map().insert_page(frame, page, page_size);
+                    entry.get_map().insert_page::<T>(frame, page, page_size);
                 },
                 (_, PageEntryType::PageEntry(_)) => {
                     panic!("Can't insert a smaller page. There's already a 1gb page here.");
@@ -359,7 +365,9 @@ mod level3 {
 }
 
 mod level2 {
+    use core::ops::DerefMut;
     use ::mem::{Frame, Page};
+    use ::falloc::FrameGetter;
     use super::{level1, PageEntryBuilder, ReadWrite, PageSize};
 
     pub struct PageMap {
@@ -381,7 +389,7 @@ mod level2 {
             }
         }
 
-        pub fn insert_page(&mut self, frame: Frame, page: Page, page_size: PageSize) {
+        pub fn insert_page<T: FrameGetter>(&mut self, frame: Frame, page: Page, page_size: PageSize) {
             let index = {
                 let virtual_address: ::mem::VirtualAddress = page.into();
                 let virtual_address: usize = virtual_address.into();
@@ -400,7 +408,7 @@ mod level2 {
                 (PageSize::FourKb, PageEntryType::NotPresent(_)) => {
                     // Insert a new page table entry
                     let entry = {
-                        let frame = unsafe { ::falloc::FRAME_ALLOCATOR.get_frame() };
+                        let frame = <T as FrameGetter>::get_frame_allocator().deref_mut().get_frame();
                         let physical_address: ::mem::PhysicalAddress = frame.into();
                         let entry = PageTableEntry::new(frame);
                         self.table[index] = entry.into();

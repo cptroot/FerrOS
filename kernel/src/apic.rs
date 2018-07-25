@@ -19,7 +19,7 @@ impl LapicRegisters {
     }
 
     pub fn page_in(&self, page_table: &mut ::page_table::PageTable) {
-        page_table.insert_page(::mem::PhysicalAddress::new(self.ptr as usize).into(), ::mem::VirtualAddress::new(self.ptr as usize).into(), ::page_table::PageSize::FourKb);
+        page_table.insert_page::<::FramePlace>(::mem::PhysicalAddress::new(self.ptr as usize).into(), ::mem::VirtualAddress::new(self.ptr as usize).into(), ::page_table::PageSize::FourKb);
     }
 
     pub unsafe fn send_startup_ipi(&mut self) {

@@ -19,6 +19,9 @@ fn main() {
         .subcommand(SubCommand::with_name("check")
             .about("Runs the typecheck part of building FerrOS")
             .version("0.1"))
+        .subcommand(SubCommand::with_name("doc")
+            .about("Creates documentation for the loader and kernel")
+            .version("0.1"))
         .subcommand(SubCommand::with_name("clean")
             .about("Cleans FerrOS artifacts")
             .version("0.1"))
@@ -34,6 +37,9 @@ fn main() {
         Some("build") => {
             build();
         },
+        Some("doc") => {
+            doc();
+        },
         Some("check") => {
             check();
         },
@@ -43,7 +49,27 @@ fn main() {
         _ => {
         }
     }
+}
 
+fn doc() {
+    let mut loader = Command::new("xargo")
+        .env("RUST_TARGET_PATH", std::env::current_dir().expect("can't retrieve the current directory"))
+        .current_dir("./loader")
+        .arg("doc")
+        .args(&["--target", "x86_64-unknown-pintos"])
+        .spawn()
+        .expect("failed to run xargo");
+    loader.wait();
+
+    let mut kernel = Command::new("xargo")
+        .env("RUST_TARGET_PATH", std::env::current_dir().expect("can't retrieve the current directory"))
+        .current_dir("./kernel")
+        .arg("doc")
+        .args(&["--target", "x86_64-unknown-pintos"])
+        .spawn()
+        .expect("failed to run xargo");
+
+    kernel.wait();
 }
 
 fn clean() -> bool {

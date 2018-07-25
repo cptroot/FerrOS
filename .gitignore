@@ -3,6 +3,7 @@ target_ferros
 *.so
 *.o
 debug.efi
+kernel.efi
 __pycache__
 BOOTX64.efi
 *.pyc
