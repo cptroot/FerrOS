@@ -9,7 +9,7 @@ static ALL_THREADS: AtomicRingBuffer<*mut Thread, [*mut Thread; 6]> =
 pub struct Tid(u64);
 
 #[repr(u64)]
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Status {
     Ready,
     Running,
@@ -35,12 +35,13 @@ impl AtomicStatus {
 }
 
 const MAX_TICKS: u64 = 0x5;
-const DATA_SIZE: usize = 0x1000 - (5 * 0x8);
+const DATA_SIZE: usize = 0x1000 - (6 * 0x8);
 #[repr(C)]
 pub struct Thread {
     tid: Tid,
     ticks: u64,
     status: Status,
+    is_idle: bool,
     stack: *mut u8,
     magic: u64,
     data: [u8; DATA_SIZE],
@@ -151,12 +152,12 @@ impl Thread {
     */
 
     pub fn new_in_place(ptr: *mut Thread, fn_ptr: fn()) {
-        Thread::new_in_place_no_insert(ptr, fn_ptr);
+        Thread::new_in_place_no_insert(ptr, false, fn_ptr);
 
         ALL_THREADS.enqueue(|thread_ptr| { *thread_ptr = ptr; });
     }
 
-    pub fn new_in_place_no_insert(ptr: *mut Thread, fn_ptr: fn()) {
+    pub fn new_in_place_no_insert(ptr: *mut Thread, is_idle: bool, fn_ptr: fn()) {
         unsafe {
             (*ptr).tid = Tid(0);
             (*ptr).ticks = MAX_TICKS;
@@ -235,22 +236,35 @@ impl Thread {
     pub fn exit(&mut self) -> ! {
         self.status = Status::Dying;
 
-        self.schedule(Status::Ready);
+        let interrupt_guard = ::interrupts::disable();
+        self.schedule(&interrupt_guard, Status::Ready);
 
         unreachable!();
     }
 
-    pub fn schedule(&mut self, status: Status) {
+    pub fn schedule(&mut self, interrupt_guard: &InterruptGuard, status: Status) {
         assert!(self.magic == THREAD_MAGIC);
         assert!(self.status != Status::Ready);
         let next_thread = {
-            let mut next_thread = 0 as *mut Thread;
-            ALL_THREADS.dequeue_spin(|thread| { next_thread = *thread });
+            let mut next_thread = None;
+            ALL_THREADS.dequeue(|thread| { next_thread = Some(*thread) });
             next_thread
         };
 
-        if next_thread != self as *mut Thread {
+        let status = self.status;
+        let self_ptr = self as *mut Thread;
+        let next_thread = next_thread.unwrap_or_else(|| {
+            if status == Status::Running {
+                self_ptr
+            } else {
+                // THIS IS A COPY. BEWARE
+                *::per_cpu::retrieve_per_cpu(&interrupt_guard).get_idle_thread()
+            }
+        });
+
+        if next_thread != self_ptr {
             unsafe {
+                // TODO make switch_to_thread consume and return an interrupt_guard
                 let last_thread = (*next_thread).switch_to_thread();
                 (*last_thread).finish_switching();
             }
@@ -275,9 +289,11 @@ impl Thread {
 
         if self.status == Status::Running {
             self.status = Status::Ready;
-            ALL_THREADS.enqueue_spin(|thread_ptr| {
-                *thread_ptr = self as *mut Thread;
-            });
+            if !self.is_idle {
+                ALL_THREADS.enqueue_spin(|thread_ptr| {
+                    *thread_ptr = self as *mut Thread;
+                });
+            }
         }
 
         // if thread is exiting destroy it

@@ -283,7 +283,7 @@ pub extern fn kernel_entry(
         let addr_usize: usize = page_vaddr.into();
         let thread: *mut threads::Thread = addr_usize as *mut threads::Thread;
 
-        threads::Thread::new_in_place_no_insert(thread, threads::idle_thread);
+        threads::Thread::new_in_place_no_insert(thread, true, threads::idle_thread);
 
         thread
     };
@@ -299,7 +299,7 @@ pub extern fn kernel_entry(
         let addr_usize: usize = page_vaddr.into();
         let thread: *mut threads::Thread = addr_usize as *mut threads::Thread;
 
-        threads::Thread::new_in_place_no_insert(thread, count_up);
+        threads::Thread::new_in_place_no_insert(thread, false, count_up);
 
         thread
     };
@@ -438,7 +438,7 @@ fn ap_initialize_thread(single_execution: &SingleExecution, interrupt_guard: &In
         let addr_usize: usize = page_vaddr.into();
         let thread: *mut threads::Thread = addr_usize as *mut threads::Thread;
 
-        threads::Thread::new_in_place_no_insert(thread, threads::idle_thread);
+        threads::Thread::new_in_place_no_insert(thread, true, threads::idle_thread);
 
         thread
     };
@@ -535,12 +535,9 @@ extern "x86-interrupt" fn timer_handler(stack_frame: &mut ExceptionStackFrame) {
     let thread = ::threads::current_thread(&interrupt_guard);
     let should_schedule = stack_frame.stack_pointer.0 > 0x8000000000 && (*thread).tick() == 0;
     unsafe {
-        // Because we eoi here, this means that if we don't schedule fast enough we can get bitten
-        // by another timer interrupt. Might have to add code to the timer interrupt to deal with
-        // that fact
         LAPIC_REGISTERS.as_mut().unwrap().eoi();
         if should_schedule {
-            thread.schedule(threads::Status::Ready);
+            thread.schedule(&interrupt_guard, threads::Status::Ready);
         }
     }
 }
